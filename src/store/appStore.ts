@@ -8,6 +8,11 @@ interface AppState {
   budgets: any[]
   recurringExpenses: any[]
   savingsGoals: any[]
+  // Budget REV02
+  budgetCategories: any[]
+  budgetItems: any[]
+  categoryBudgetMappings: any[]
+  yearTransactions: any[]
   selectedMonth: number
   selectedYear: number
   loading: boolean
@@ -24,6 +29,18 @@ interface AppState {
   addTransaction: (tx: any) => Promise<{ error: any }>
   deleteTransaction: (id: string) => Promise<{ error: any }>
   updateTransaction: (id: string, updates: any) => Promise<{ error: any }>
+  // Budget REV02
+  loadBudgetCategories: (familyId: string) => Promise<void>
+  loadBudgetItems: (familyId: string, year: number) => Promise<void>
+  loadCategoryBudgetMappings: (familyId: string) => Promise<void>
+  loadYearTransactions: (familyId: string, year: number) => Promise<void>
+  addBudgetItem: (item: any) => Promise<{ error: any; data?: any }>
+  updateBudgetItem: (id: string, updates: any) => Promise<{ error: any }>
+  deleteBudgetItem: (id: string) => Promise<{ error: any }>
+  addBudgetCategory: (cat: any) => Promise<{ error: any; data?: any }>
+  updateBudgetCategory: (id: string, updates: any) => Promise<{ error: any }>
+  deleteBudgetCategory: (id: string) => Promise<{ error: any }>
+  saveCategoryBudgetMapping: (familyId: string, txCategoryId: string, budgetCategoryId: string | null) => Promise<{ error: any }>
 }
 
 const now = new Date()
@@ -35,6 +52,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   budgets: [],
   recurringExpenses: [],
   savingsGoals: [],
+  budgetCategories: [],
+  budgetItems: [],
+  categoryBudgetMappings: [],
+  yearTransactions: [],
   selectedMonth: now.getMonth() + 1,
   selectedYear: now.getFullYear(),
   loading: false,
@@ -116,5 +137,97 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => ({ transactions: state.transactions.map(t => t.id === id ? data : t) }))
     }
     return { error }
-  }
+  },
+
+  // ── Budget REV02 ──────────────────────────────────────────
+
+  loadBudgetCategories: async (familyId) => {
+    const { data } = await supabase
+      .from('budget_categories')
+      .select('*')
+      .eq('family_id', familyId)
+      .order('sort_order')
+    set({ budgetCategories: data || [] })
+  },
+
+  loadBudgetItems: async (familyId, year) => {
+    const { data } = await supabase
+      .from('budget_items')
+      .select('*')
+      .eq('family_id', familyId)
+      .eq('year', year)
+      .order('created_at')
+    set({ budgetItems: data || [] })
+  },
+
+  loadCategoryBudgetMappings: async (familyId) => {
+    const { data } = await supabase
+      .from('category_budget_mapping')
+      .select('*')
+      .eq('family_id', familyId)
+    set({ categoryBudgetMappings: data || [] })
+  },
+
+  loadYearTransactions: async (familyId, year) => {
+    const { data } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('family_id', familyId)
+      .gte('date', `${year}-01-01`)
+      .lte('date', `${year}-12-31`)
+      .order('date', { ascending: false })
+    set({ yearTransactions: data || [] })
+  },
+
+  addBudgetItem: async (item) => {
+    const { data, error } = await supabase.from('budget_items').insert(item).select().single()
+    return { error, data }
+  },
+
+  updateBudgetItem: async (id, updates) => {
+    const { error } = await supabase.from('budget_items').update(updates).eq('id', id)
+    return { error }
+  },
+
+  deleteBudgetItem: async (id) => {
+    const { error } = await supabase.from('budget_items').delete().eq('id', id)
+    if (!error) {
+      set(state => ({ budgetItems: state.budgetItems.filter(i => i.id !== id) }))
+    }
+    return { error }
+  },
+
+  addBudgetCategory: async (cat) => {
+    const { data, error } = await supabase.from('budget_categories').insert(cat).select().single()
+    return { error, data }
+  },
+
+  updateBudgetCategory: async (id, updates) => {
+    const { error } = await supabase.from('budget_categories').update(updates).eq('id', id)
+    return { error }
+  },
+
+  deleteBudgetCategory: async (id) => {
+    const { error } = await supabase.from('budget_categories').delete().eq('id', id)
+    if (!error) {
+      set(state => ({ budgetCategories: state.budgetCategories.filter(c => c.id !== id) }))
+    }
+    return { error }
+  },
+
+  saveCategoryBudgetMapping: async (familyId, txCategoryId, budgetCategoryId) => {
+    if (!budgetCategoryId) {
+      const { error } = await supabase
+        .from('category_budget_mapping')
+        .delete()
+        .eq('family_id', familyId)
+        .eq('transaction_category_id', txCategoryId)
+      return { error }
+    }
+    const { error } = await supabase
+      .from('category_budget_mapping')
+      .upsert({ family_id: familyId, transaction_category_id: txCategoryId, budget_category_id: budgetCategoryId },
+               { onConflict: 'family_id,transaction_category_id' })
+    return { error }
+  },
 }))

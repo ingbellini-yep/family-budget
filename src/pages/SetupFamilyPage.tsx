@@ -34,6 +34,17 @@ const DEFAULT_CATEGORIES = [
   { name: 'Obiettivo generico', type: 'risparmio' as const, color: '#3b82f6', icon: '🎯' },
 ]
 
+const DEFAULT_BUDGET_CATEGORIES = [
+  { name: 'Casa', icon: '🏠', color: '#ef4444', sort_order: 1, is_default: true },
+  { name: 'Auto & Trasporti', icon: '🚗', color: '#f97316', sort_order: 2, is_default: true },
+  { name: 'Voluttuario', icon: '🛍️', color: '#a855f7', sort_order: 3, is_default: true },
+  { name: 'Vestiario', icon: '👗', color: '#ec4899', sort_order: 4, is_default: true },
+  { name: 'Sanità', icon: '🏥', color: '#f43f5e', sort_order: 5, is_default: true },
+  { name: 'Istruzione & Formazione', icon: '📚', color: '#0ea5e9', sort_order: 6, is_default: true },
+  { name: 'Extra non previsto', icon: '🎯', color: '#f59e0b', sort_order: 7, is_default: true },
+  { name: 'Investimenti & Risparmio', icon: '💰', color: '#10b981', sort_order: 8, is_default: true },
+]
+
 const DEFAULT_ACCOUNTS = [
   { name: 'Conto corrente', type: 'corrente' as const, color: '#3b82f6', balance: 0 },
   { name: 'Carta di credito', type: 'carta' as const, color: '#8b5cf6', balance: 0 },
@@ -84,6 +95,10 @@ export default function SetupFamilyPage() {
         icon: null,
       }))
       await supabase.from('accounts').insert(accounts)
+
+      // Seed default budget categories (macrovoci)
+      const budgetCats = DEFAULT_BUDGET_CATEGORIES.map(cat => ({ ...cat, family_id: family.id }))
+      await supabase.from('budget_categories').insert(budgetCats)
 
       await loadProfile()
       navigate('/dashboard')

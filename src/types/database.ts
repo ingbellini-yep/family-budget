@@ -55,6 +55,24 @@ export type Database = {
         Update: { id?: string; family_id?: string; user_id?: string; source_type?: 'pdf' | 'screenshot' | 'csv'; bank_name?: string | null; file_name?: string | null; status?: 'pending' | 'completed' | 'failed'; transactions_imported?: number; created_at?: string }
         Relationships: []
       }
+      budget_categories: {
+        Row: { id: string; family_id: string; name: string; icon: string | null; color: string | null; sort_order: number; is_default: boolean; created_at: string }
+        Insert: { id?: string; family_id: string; name: string; icon?: string | null; color?: string | null; sort_order?: number; is_default?: boolean; created_at?: string }
+        Update: { id?: string; family_id?: string; name?: string; icon?: string | null; color?: string | null; sort_order?: number; is_default?: boolean; created_at?: string }
+        Relationships: []
+      }
+      budget_items: {
+        Row: { id: string; family_id: string; budget_category_id: string | null; year: number; type: 'income' | 'expense' | 'saving_goal'; description: string; recurrence: 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly'; recurrence_month: number | null; recurrence_day: number | null; recurrence_date: string | null; amount: number; is_variable: boolean; notes: string | null; active: boolean; target_amount: number | null; target_date: string | null; account_id: string | null; created_at: string }
+        Insert: { id?: string; family_id: string; budget_category_id?: string | null; year: number; type: 'income' | 'expense' | 'saving_goal'; description: string; recurrence: 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly'; recurrence_month?: number | null; recurrence_day?: number | null; recurrence_date?: string | null; amount: number; is_variable?: boolean; notes?: string | null; active?: boolean; target_amount?: number | null; target_date?: string | null; account_id?: string | null; created_at?: string }
+        Update: { id?: string; family_id?: string; budget_category_id?: string | null; year?: number; type?: 'income' | 'expense' | 'saving_goal'; description?: string; recurrence?: 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly'; recurrence_month?: number | null; recurrence_day?: number | null; recurrence_date?: string | null; amount?: number; is_variable?: boolean; notes?: string | null; active?: boolean; target_amount?: number | null; target_date?: string | null; account_id?: string | null; created_at?: string }
+        Relationships: []
+      }
+      category_budget_mapping: {
+        Row: { id: string; family_id: string; transaction_category_id: string; budget_category_id: string }
+        Insert: { id?: string; family_id: string; transaction_category_id: string; budget_category_id: string }
+        Update: { id?: string; family_id?: string; transaction_category_id?: string; budget_category_id?: string }
+        Relationships: []
+      }
     }
     Views: { [_ in never]: never }
     Functions: { [_ in never]: never }
