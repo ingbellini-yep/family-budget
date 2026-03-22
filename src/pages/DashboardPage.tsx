@@ -58,6 +58,7 @@ export default function DashboardPage() {
   // Load historical data (last 12 months)
   useEffect(() => {
     if (!profile?.family_id) return
+    const familyId = profile.family_id
     const loadHistorical = async () => {
       const results = []
       for (let i = 11; i >= 0; i--) {
@@ -69,7 +70,7 @@ export default function DashboardPage() {
         const { data } = await supabase
           .from('transactions')
           .select('type, amount')
-          .eq('family_id', profile.family_id)
+          .eq('family_id', familyId)
           .gte('date', startDate)
           .lte('date', endDate)
         const income = (data || []).filter(t => t.type === 'entrata').reduce((s: number, t: any) => s + t.amount, 0)
@@ -93,8 +94,8 @@ export default function DashboardPage() {
     if (profile?.family_id) loadTransactions(profile.family_id, selectedMonth === 12 ? selectedYear + 1 : selectedYear, selectedMonth === 12 ? 1 : selectedMonth + 1)
   }
 
-  const statusColors = { green: 'bg-green-100 text-green-700', yellow: 'bg-yellow-100 text-yellow-700', red: 'bg-red-100 text-red-700' }
-  const barStatusColors = { green: 'bg-green-500', yellow: 'bg-yellow-500', red: 'bg-red-500' }
+  const statusColors: Record<'green' | 'yellow' | 'red', string> = { green: 'bg-green-100 text-green-700', yellow: 'bg-yellow-100 text-yellow-700', red: 'bg-red-100 text-red-700' }
+  const barStatusColors: Record<'green' | 'yellow' | 'red', string> = { green: 'bg-green-500', yellow: 'bg-yellow-500', red: 'bg-red-500' }
 
   return (
     <div className="p-4 md:p-6 space-y-6 pb-20 md:pb-6">
