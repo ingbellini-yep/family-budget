@@ -163,7 +163,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2">
                     <div className="h-3 w-3 rounded-full" style={{ backgroundColor: b.color }}></div>
                     <span className="text-sm text-gray-700">{b.categoryName}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColors[b.status]}`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColors[b.status as 'green' | 'yellow' | 'red']}`}>
                       {b.status === 'green' ? 'OK' : b.status === 'yellow' ? 'Attenzione' : 'Sforato'}
                     </span>
                   </div>
@@ -173,7 +173,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${barStatusColors[b.status]}`}
+                    className={`h-full rounded-full transition-all ${barStatusColors[b.status as 'green' | 'yellow' | 'red']}`}
                     style={{ width: `${Math.min(b.percentage, 100)}%` }}
                   />
                 </div>
