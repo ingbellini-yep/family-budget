@@ -8,9 +8,9 @@ export type Database = {
         Relationships: []
       }
       profiles: {
-        Row: { id: string; email: string; full_name: string | null; family_id: string | null; created_at: string }
-        Insert: { id: string; email: string; full_name?: string | null; family_id?: string | null; created_at?: string }
-        Update: { id?: string; email?: string; full_name?: string | null; family_id?: string | null; created_at?: string }
+        Row: { id: string; email: string; full_name: string | null; family_id: string | null; role: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; created_at: string }
+        Insert: { id: string; email: string; full_name?: string | null; family_id?: string | null; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; created_at?: string }
+        Update: { id?: string; email?: string; full_name?: string | null; family_id?: string | null; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; created_at?: string }
         Relationships: []
       }
       accounts: {
@@ -71,6 +71,24 @@ export type Database = {
         Row: { id: string; family_id: string; transaction_category_id: string; budget_category_id: string }
         Insert: { id?: string; family_id: string; transaction_category_id: string; budget_category_id: string }
         Update: { id?: string; family_id?: string; transaction_category_id?: string; budget_category_id?: string }
+        Relationships: []
+      }
+      planned_transfers: {
+        Row: { id: string; family_id: string; from_account_id: string; to_account_id: string; amount: number; recurrence: 'monthly' | 'annual' | 'once' | 'quarterly'; recurrence_month: number | null; recurrence_date: string | null; description: string | null; year: number; active: boolean; created_at: string }
+        Insert: { id?: string; family_id: string; from_account_id: string; to_account_id: string; amount: number; recurrence?: 'monthly' | 'annual' | 'once' | 'quarterly'; recurrence_month?: number | null; recurrence_date?: string | null; description?: string | null; year: number; active?: boolean; created_at?: string }
+        Update: { id?: string; family_id?: string; from_account_id?: string; to_account_id?: string; amount?: number; recurrence?: 'monthly' | 'annual' | 'once' | 'quarterly'; recurrence_month?: number | null; recurrence_date?: string | null; description?: string | null; year?: number; active?: boolean; created_at?: string }
+        Relationships: []
+      }
+      residual_distribution: {
+        Row: { id: string; family_id: string; year: number; label: string; account_id: string | null; savings_goal_id: string | null; percentage: number; sort_order: number; created_at: string }
+        Insert: { id?: string; family_id: string; year: number; label: string; account_id?: string | null; savings_goal_id?: string | null; percentage: number; sort_order?: number; created_at?: string }
+        Update: { id?: string; family_id?: string; year?: number; label?: string; account_id?: string | null; savings_goal_id?: string | null; percentage?: number; sort_order?: number; created_at?: string }
+        Relationships: []
+      }
+      family_invites: {
+        Row: { id: string; family_id: string; invited_by: string; email: string; role: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; token: string | null; status: 'pending' | 'accepted' | 'expired' | 'revoked'; created_at: string; expires_at: string | null; accepted_at: string | null }
+        Insert: { id?: string; family_id: string; invited_by: string; email: string; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; token?: string | null; status?: 'pending' | 'accepted' | 'expired' | 'revoked'; created_at?: string; expires_at?: string | null; accepted_at?: string | null }
+        Update: { id?: string; family_id?: string; invited_by?: string; email?: string; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; token?: string | null; status?: 'pending' | 'accepted' | 'expired' | 'revoked'; created_at?: string; expires_at?: string | null; accepted_at?: string | null }
         Relationships: []
       }
     }
