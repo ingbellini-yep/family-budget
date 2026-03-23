@@ -482,7 +482,7 @@ export default function BudgetPage() {
   // ── handlers
   const openAddItem = (defaultType: ItemType = 'expense', defaultCatId?: string) => {
     const f = defaultForm(); f.type = defaultType; f.budget_category_id = defaultCatId || null
-    setItemForm(f); setItemModal({ mode: 'add', defaultType, defaultCatId })
+    setSaveError(null); setItemForm(f); setItemModal({ mode: 'add', defaultType, defaultCatId })
   }
   const openEditItem = (item: any) => {
     setItemForm({
@@ -493,15 +493,18 @@ export default function BudgetPage() {
       target_amount: String(item.target_amount || ''), target_date: item.target_date || '',
       planned_account_id: item.planned_account_id || null,
     })
-    setItemModal({ mode: 'edit', item })
+    setSaveError(null); setItemModal({ mode: 'edit', item })
   }
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const handleSaveItem = async () => {
     if (!profile?.family_id || !itemForm.description.trim() || !itemForm.amount) return
     setSaving(true)
+    setSaveError(null)
     const payload: any = {
       family_id: profile.family_id, year: viewYear, type: itemForm.type,
       description: itemForm.description.trim(), budget_category_id: itemForm.budget_category_id,
-      planned_account_id: itemForm.planned_account_id,
+      planned_account_id: itemForm.planned_account_id || null,
       recurrence: itemForm.recurrence, recurrence_month: itemForm.recurrence_month,
       recurrence_date: itemForm.recurrence_date || null,
       amount: parseFloat(itemForm.amount) || 0,
@@ -511,10 +514,24 @@ export default function BudgetPage() {
       payload.target_amount = parseFloat(itemForm.target_amount) || null
       payload.target_date = itemForm.target_date || null
     }
-    if (itemModal?.mode === 'edit' && itemModal.item) await updateBudgetItem(itemModal.item.id, payload)
-    else await addBudgetItem(payload)
+    console.log('[Budget] Saving item payload:', payload)
+    let error: any = null
+    if (itemModal?.mode === 'edit' && itemModal.item) {
+      const r = await updateBudgetItem(itemModal.item.id, payload)
+      error = r.error
+    } else {
+      const r = await addBudgetItem(payload)
+      error = r.error
+    }
+    if (error) {
+      console.error('[Budget] Save failed:', error)
+      setSaveError(error.message || 'Errore nel salvataggio')
+      setSaving(false)
+      return
+    }
     await loadBudgetItems(profile.family_id, viewYear)
-    setSaving(false); setItemModal(null)
+    setSaving(false)
+    setItemModal(null)
   }
   const handleDeleteItem = async (id: string) => {
     if (!profile?.family_id || !confirm('Eliminare questa voce?')) return
@@ -1477,7 +1494,7 @@ export default function BudgetPage() {
                 <select value={itemForm.planned_account_id || ''} onChange={e => setItemForm(f => ({ ...f, planned_account_id: e.target.value || null }))}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
                   <option value="">— Non assegnato —</option>
-                  {accounts.map((acc: any) => <option key={acc.id} value={acc.id}>{acc.icon ? acc.icon + ' ' : ''}{acc.name}</option>)}
+                  {accounts.filter((acc: any) => acc.active !== false).map((acc: any) => <option key={acc.id} value={acc.id}>{acc.icon ? acc.icon + ' ' : ''}{acc.name}</option>)}
                 </select>
               </div>
               {itemForm.type === 'saving_goal' && (
@@ -1507,8 +1524,13 @@ export default function BudgetPage() {
                 </button>
               </div>
             </div>
+            {saveError && (
+              <div className="mx-4 mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                ⚠️ {saveError}
+              </div>
+            )}
             <div className="flex gap-3 p-4 border-t">
-              <button onClick={() => setItemModal(null)} className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Annulla</button>
+              <button onClick={() => { setItemModal(null); setSaveError(null) }} className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Annulla</button>
               <button onClick={handleSaveItem} disabled={saving || !itemForm.description.trim() || !itemForm.amount}
                 className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
                 {saving ? 'Salvataggio...' : 'Salva'}
