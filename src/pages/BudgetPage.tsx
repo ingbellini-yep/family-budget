@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
+import { supabase } from '../lib/supabase'
 import { formatCurrency } from '../lib/utils'
-import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2, X, ChevronDown, ChevronUp, Link } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2, X, ChevronDown, ChevronUp, Link, AlertTriangle, TrendingUp, TrendingDown, Sliders } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
@@ -57,6 +58,13 @@ function getRecurrenceLabel(item: any): string {
     if (item.recurrence_month) return `${base} (${MONTHS_IT[item.recurrence_month - 1]})`
   }
   return base
+}
+
+function getTransferAnnual(t: any): number {
+  const amt = Number(t.amount)
+  if (t.recurrence === 'monthly') return amt * 12
+  if (t.recurrence === 'quarterly') return amt * 4
+  return amt // annual, once
 }
 
 function ItemRow({ item, onEdit, onDelete }: { item: any; onEdit: () => void; onDelete: () => void }) {
@@ -123,12 +131,28 @@ export default function BudgetPage() {
   const [mappingModal, setMappingModal] = useState(false)
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({})
 
+  // ── Fabbisogno per conto + Distribuzione residuo (Fase 3 REV05)
+  const [plannedTransfers, setPlannedTransfers] = useState<any[]>([])
+  const [residualDist, setResidualDist] = useState<any[]>([])
+  const [residualModal, setResidualModal] = useState<{ mode: 'add' | 'edit'; item?: any } | null>(null)
+  const [residualForm, setResidualForm] = useState({ label: '', percentage: '', account_id: '', savings_goal_id: '' })
+  const { savingsGoals, loadSavingsGoals } = useAppStore()
+
   useEffect(() => {
     if (profile?.family_id) {
       loadBudgetCategories(profile.family_id)
       loadBudgetItems(profile.family_id, viewYear)
       loadCategoryBudgetMappings(profile.family_id)
       loadYearTransactions(profile.family_id, viewYear)
+      loadSavingsGoals(profile.family_id)
+      // Carica trasferimenti pianificati e distribuzione residuo
+      supabase.from('planned_transfers').select('*')
+        .eq('family_id', profile.family_id).eq('year', viewYear).eq('active', true)
+        .then(({ data }) => setPlannedTransfers(data || []))
+      supabase.from('residual_distribution').select('*')
+        .eq('family_id', profile.family_id).eq('year', viewYear)
+        .order('sort_order')
+        .then(({ data }) => setResidualDist(data || []))
     }
   }, [profile?.family_id, viewYear])
 
@@ -241,6 +265,78 @@ export default function BudgetPage() {
       })
       .filter(d => d.preventivo > 0 || d.consuntivo > 0)
   }, [budgetCategories, confronto, curMonth])
+
+  // ── Fabbisogno per conto (Fase 3)
+  const fabbisognoByConto = useMemo(() => {
+    const spendItems = [...expenseItems, ...savingItems]
+    return accounts
+      .filter((a: any) => a.active !== false)
+      .map((account: any) => {
+        const incomeAssigned = incomeItems
+          .filter((i: any) => i.planned_account_id === account.id)
+          .reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+        const expenseAssigned = spendItems
+          .filter((i: any) => i.planned_account_id === account.id)
+          .reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+        const transfersIn = plannedTransfers
+          .filter((t: any) => t.to_account_id === account.id)
+          .reduce((s: number, t: any) => s + getTransferAnnual(t), 0)
+        const transfersOut = plannedTransfers
+          .filter((t: any) => t.from_account_id === account.id)
+          .reduce((s: number, t: any) => s + getTransferAnnual(t), 0)
+        const net = incomeAssigned + transfersIn - expenseAssigned - transfersOut
+        return { account, incomeAssigned, expenseAssigned, transfersIn, transfersOut, net }
+      })
+      .filter(c => c.incomeAssigned > 0 || c.expenseAssigned > 0 || c.transfersIn > 0 || c.transfersOut > 0)
+  }, [accounts, incomeItems, expenseItems, savingItems, plannedTransfers])
+
+  // ── Handlers distribuzione residuo
+  const loadResidualDist = async () => {
+    if (!profile?.family_id) return
+    const { data } = await supabase.from('residual_distribution').select('*')
+      .eq('family_id', profile.family_id).eq('year', viewYear).order('sort_order')
+    setResidualDist(data || [])
+  }
+
+  const openAddResidual = () => {
+    setResidualForm({ label: '', percentage: '', account_id: '', savings_goal_id: '' })
+    setResidualModal({ mode: 'add' })
+  }
+
+  const openEditResidual = (item: any) => {
+    setResidualForm({ label: item.label, percentage: String(item.percentage), account_id: item.account_id || '', savings_goal_id: item.savings_goal_id || '' })
+    setResidualModal({ mode: 'edit', item })
+  }
+
+  const handleSaveResidual = async () => {
+    if (!profile?.family_id || !residualForm.label.trim() || !residualForm.percentage) return
+    setSaving(true)
+    const payload = {
+      family_id: profile.family_id,
+      year: viewYear,
+      label: residualForm.label.trim(),
+      percentage: parseFloat(residualForm.percentage) || 0,
+      account_id: residualForm.account_id || null,
+      savings_goal_id: residualForm.savings_goal_id || null,
+      sort_order: residualDist.length,
+    }
+    if (residualModal?.mode === 'edit' && residualModal.item) {
+      await supabase.from('residual_distribution').update(payload as any).eq('id', residualModal.item.id)
+    } else {
+      await supabase.from('residual_distribution').insert(payload as any)
+    }
+    await loadResidualDist()
+    setSaving(false)
+    setResidualModal(null)
+  }
+
+  const handleDeleteResidual = async (id: string) => {
+    if (!confirm('Eliminare questa voce?')) return
+    await supabase.from('residual_distribution').delete().eq('id', id)
+    await loadResidualDist()
+  }
+
+  const totalPctResidual = residualDist.reduce((s: number, d: any) => s + Number(d.percentage), 0)
 
   // ── grafici di sintesi (sezione 6.5 REV03)
   const [chartsView, setChartsView] = useState<'preventivo' | 'consuntivo'>('preventivo')
@@ -541,6 +637,170 @@ export default function BudgetPage() {
               )}
             </div>
           </div>
+
+          {/* C2 - FABBISOGNO PER CONTO */}
+          {fabbisognoByConto.length > 0 && (
+            <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b bg-slate-50">
+                <span className="text-base">🏦</span>
+                <h2 className="font-semibold text-slate-800 text-sm">C2 · Fabbisogno per Conto {viewYear}</h2>
+                <span className="ml-auto text-xs text-slate-400">Saldo preventivato per ogni conto</span>
+              </div>
+              <div className="divide-y">
+                {fabbisognoByConto.map(({ account, incomeAssigned, expenseAssigned, transfersIn, transfersOut, net }) => {
+                  const isDeficit = net < 0
+                  const pctUsed = incomeAssigned + transfersIn > 0
+                    ? Math.min(((expenseAssigned + transfersOut) / (incomeAssigned + transfersIn)) * 100, 200)
+                    : 100
+                  const barColor = isDeficit ? 'bg-red-400' : pctUsed > 90 ? 'bg-yellow-400' : 'bg-green-400'
+                  // accounts with surplus that could cover this deficit
+                  const surplusConti = fabbisognoByConto
+                    .filter(c => c.account.id !== account.id && c.net > 0)
+                    .sort((a, b) => b.net - a.net)
+                    .slice(0, 2)
+                  return (
+                    <div key={account.id} className="px-4 py-3">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ backgroundColor: account.color || '#94a3b8' }}>
+                          {account.name.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-800 text-sm">{account.name}</span>
+                            <span className="text-xs text-gray-400">{account.bank_name || account.type}</span>
+                          </div>
+                        </div>
+                        <div className={`text-sm font-bold flex items-center gap-1 ${isDeficit ? 'text-red-600' : 'text-green-600'}`}>
+                          {isDeficit ? <TrendingDown className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />}
+                          {isDeficit ? '−' : '+'}{formatCurrency(Math.abs(net))}
+                        </div>
+                      </div>
+                      {/* Detail row */}
+                      <div className="flex gap-4 text-xs text-gray-500 mb-2 pl-11">
+                        {incomeAssigned > 0 && <span>Entrate: <span className="text-green-600 font-medium">{formatCurrency(incomeAssigned)}</span></span>}
+                        {transfersIn > 0 && <span>Trasf. entrata: <span className="text-green-500 font-medium">{formatCurrency(transfersIn)}</span></span>}
+                        {expenseAssigned > 0 && <span>Spese: <span className="text-red-500 font-medium">{formatCurrency(expenseAssigned)}</span></span>}
+                        {transfersOut > 0 && <span>Trasf. uscita: <span className="text-orange-500 font-medium">{formatCurrency(transfersOut)}</span></span>}
+                      </div>
+                      {/* Progress bar */}
+                      <div className="pl-11 mb-2">
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${barColor}`}
+                            style={{ width: `${Math.min(pctUsed, 100)}%` }} />
+                        </div>
+                      </div>
+                      {/* Deficit alert */}
+                      {isDeficit && (
+                        <div className="pl-11">
+                          <div className="flex items-start gap-1.5 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-xs">
+                            <AlertTriangle className="h-3.5 w-3.5 text-red-500 flex-shrink-0 mt-0.5" />
+                            <div className="text-red-700">
+                              <span className="font-semibold">Deficit {formatCurrency(Math.abs(net))}</span> — le uscite superano le entrate previste per questo conto.
+                              {surplusConti.length > 0 && (
+                                <span className="block mt-0.5 text-red-500">
+                                  Suggerimento: copri con surplus da {surplusConti.map(c => `${c.account.name} (+${formatCurrency(c.net)})`).join(', ')}.
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* C3 - DISTRIBUZIONE RESIDUO */}
+          {risparmioLibero !== 0 && (
+            <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b bg-emerald-50">
+                <span className="text-base">🪣</span>
+                <h2 className="font-semibold text-emerald-800 text-sm">C3 · Distribuzione Residuo {viewYear}</h2>
+                <span className="ml-2 text-sm font-semibold text-emerald-700">{formatCurrency(Math.max(risparmioLibero, 0))}</span>
+                <span className="text-xs text-emerald-500">disponibile</span>
+                <button
+                  onClick={openAddResidual}
+                  className="ml-auto flex items-center gap-1 text-xs bg-emerald-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-emerald-700"
+                >
+                  <Plus className="h-3 w-3" /> Aggiungi voce
+                </button>
+              </div>
+
+              {residualDist.length === 0 ? (
+                <div className="py-8 text-center text-sm text-gray-400">
+                  Nessuna destinazione definita.{' '}
+                  <button onClick={openAddResidual} className="text-emerald-600 hover:underline">Aggiungi la prima</button>
+                </div>
+              ) : (
+                <div>
+                  {/* Progress bar totale percentuale */}
+                  <div className="px-4 pt-3 pb-1">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>Percentuale distribuita</span>
+                      <span className={totalPctResidual > 100 ? 'text-red-600 font-semibold' : totalPctResidual === 100 ? 'text-green-600 font-semibold' : 'text-gray-600 font-semibold'}>
+                        {totalPctResidual.toFixed(1)}% / 100%
+                      </span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${totalPctResidual > 100 ? 'bg-red-400' : totalPctResidual === 100 ? 'bg-green-400' : 'bg-emerald-400'}`}
+                        style={{ width: `${Math.min(totalPctResidual, 100)}%` }}
+                      />
+                    </div>
+                    {totalPctResidual < 100 && risparmioLibero > 0 && (
+                      <div className="text-xs text-amber-600 mt-1">
+                        {formatCurrency(risparmioLibero * (1 - totalPctResidual / 100))} non ancora destinati ({(100 - totalPctResidual).toFixed(1)}%)
+                      </div>
+                    )}
+                  </div>
+                  {/* Lista voci */}
+                  <div className="divide-y">
+                    {residualDist.map((d: any) => {
+                      const amount = risparmioLibero > 0 ? risparmioLibero * (d.percentage / 100) : 0
+                      const linkedAccount = accounts.find((a: any) => a.id === d.account_id)
+                      const linkedGoal = savingsGoals.find((g: any) => g.id === d.savings_goal_id)
+                      return (
+                        <div key={d.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50/80">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-sm font-medium text-gray-800">{d.label}</span>
+                              {linkedAccount && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                                  🏦 {linkedAccount.name}
+                                </span>
+                              )}
+                              {linkedGoal && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">
+                                  🎯 {linkedGoal.name}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-sm font-semibold text-emerald-700">{d.percentage}%</div>
+                            {risparmioLibero > 0 && (
+                              <div className="text-xs text-gray-400">{formatCurrency(amount)}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => openEditResidual(d)} className="p-1.5 text-gray-300 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => handleDeleteResidual(d.id)} className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-red-50">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* D - GRAFICI DI SINTESI */}
           {(expenseTotal + savingTotal) > 0 && (
@@ -988,6 +1248,87 @@ export default function BudgetPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ MODAL: Distribuzione Residuo ══════════════════════ */}
+      {residualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-semibold text-gray-900">
+                {residualModal.mode === 'edit' ? 'Modifica destinazione' : 'Nuova destinazione residuo'}
+              </h2>
+              <button onClick={() => setResidualModal(null)}><X className="h-5 w-5 text-gray-400" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-700">Label</label>
+                <input
+                  value={residualForm.label}
+                  onChange={e => setResidualForm(f => ({ ...f, label: e.target.value }))}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="es. Fondo emergenza, Investimenti..."
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700">Percentuale del residuo (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={residualForm.percentage}
+                  onChange={e => setResidualForm(f => ({ ...f, percentage: e.target.value }))}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="es. 30"
+                />
+                {residualForm.percentage && risparmioLibero > 0 && (
+                  <div className="text-xs text-emerald-600 mt-1">
+                    = {formatCurrency(risparmioLibero * (parseFloat(residualForm.percentage) / 100))} su {formatCurrency(risparmioLibero)}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700">Conto destinazione (opzionale)</label>
+                <select
+                  value={residualForm.account_id}
+                  onChange={e => setResidualForm(f => ({ ...f, account_id: e.target.value }))}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">Nessuno</option>
+                  {accounts.filter((a: any) => a.active !== false).map((a: any) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700">Obiettivo risparmio (opzionale)</label>
+                <select
+                  value={residualForm.savings_goal_id}
+                  onChange={e => setResidualForm(f => ({ ...f, savings_goal_id: e.target.value }))}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">Nessuno</option>
+                  {savingsGoals.map((g: any) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 p-4 border-t">
+              <button onClick={() => setResidualModal(null)} className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Annulla
+              </button>
+              <button
+                onClick={handleSaveResidual}
+                disabled={saving || !residualForm.label.trim() || !residualForm.percentage}
+                className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+              >
+                {saving ? 'Salvataggio...' : 'Salva'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
