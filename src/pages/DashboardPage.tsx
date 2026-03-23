@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 import { useEffect, useState } from 'react'
+import { PiggyBank as PocketIcon } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -126,6 +127,85 @@ export default function DashboardPage() {
       }),
     },
   ]
+
+  // ── Pocket money view (dependent role) ──────────────────
+  if (profile?.role === 'dependent') {
+    const ownTx = transactions.filter(t => t.created_by === profile.id)
+    const ownSpent = ownTx.filter(t => t.type === 'uscita').reduce((s, t) => s + t.amount, 0)
+    const limit = profile.pocket_money_limit || 0
+    const remaining = limit - ownSpent
+    const pct = limit > 0 ? Math.min((ownSpent / limit) * 100, 100) : 0
+
+    return (
+      <div className="p-4 md:p-6 space-y-6 pb-20 md:pb-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Il mio Budget</h1>
+            <p className="text-sm text-gray-500">Pocket money — {MONTH_NAMES[selectedMonth - 1]} {selectedYear}</p>
+          </div>
+          <div className="flex items-center gap-2 bg-white border rounded-xl px-3 py-2 shadow-sm">
+            <button onClick={prevMonth} className="text-gray-400 hover:text-gray-700"><ChevronLeft className="h-4 w-4" /></button>
+            <span className="text-sm font-medium min-w-[100px] text-center">{MONTH_NAMES[selectedMonth - 1]}</span>
+            <button onClick={nextMonth} className="text-gray-400 hover:text-gray-700"><ChevronRight className="h-4 w-4" /></button>
+          </div>
+        </div>
+
+        {/* Pocket money card */}
+        <div className="bg-gradient-to-br from-orange-400 to-amber-500 rounded-2xl p-6 text-white shadow-lg">
+          <div className="flex items-center gap-3 mb-4">
+            <PocketIcon className="h-6 w-6" />
+            <span className="font-semibold">Pocket Money Mensile</span>
+          </div>
+          {limit > 0 ? (
+            <>
+              <div className="text-4xl font-bold mb-1">{formatCurrency(remaining)}</div>
+              <p className="text-orange-100 text-sm mb-4">rimanenti su {formatCurrency(limit)}</p>
+              <div className="h-3 bg-white/30 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-300' : 'bg-white'}`} style={{ width: `${pct}%` }} />
+              </div>
+              <div className="flex justify-between text-xs text-orange-100 mt-1">
+                <span>Speso: {formatCurrency(ownSpent)}</span>
+                <span>{pct.toFixed(0)}%</span>
+              </div>
+            </>
+          ) : (
+            <div className="text-orange-100 text-sm">Nessun limite impostato dall'amministratore</div>
+          )}
+        </div>
+
+        {/* Own transactions */}
+        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b">
+            <h2 className="font-semibold text-sm text-gray-900">Le mie transazioni — {MONTH_NAMES[selectedMonth - 1]}</h2>
+          </div>
+          {ownTx.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-400">Nessuna transazione questo mese</div>
+          ) : (
+            <div className="divide-y">
+              {ownTx.map(t => {
+                const cat = categories.find(c => c.id === t.category_id)
+                return (
+                  <div key={t.id} className="px-4 py-3 flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
+                      style={{ backgroundColor: (cat?.color || '#94a3b8') + '22', color: cat?.color || '#94a3b8' }}>
+                      {(cat?.name || '?').charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-gray-800 truncate">{t.description}</div>
+                      <div className="text-xs text-gray-400">{cat?.name} · {new Date(t.date + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}</div>
+                    </div>
+                    <span className={`text-sm font-semibold flex-shrink-0 ${t.type === 'entrata' ? 'text-green-600' : 'text-red-600'}`}>
+                      {t.type === 'entrata' ? '+' : '-'}{formatCurrency(t.amount)}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6 pb-20 md:pb-6">

@@ -10,6 +10,7 @@ import AccountsPage from './pages/AccountsPage'
 import SettingsPage from './pages/SettingsPage'
 import RecurringPage from './pages/RecurringPage'
 import GoalsPage from './pages/GoalsPage'
+import InvitePage from './pages/InvitePage'
 import Layout from './components/Layout'
 import SetupFamilyPage from './pages/SetupFamilyPage'
 
@@ -39,6 +40,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/auth" element={<AuthPage />} />
+      <Route path="/invite" element={<InvitePage />} />
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="setup" element={<SetupFamilyPage />} />

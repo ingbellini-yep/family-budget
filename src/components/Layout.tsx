@@ -5,21 +5,24 @@ import { useEffect, useState } from 'react'
 import { LayoutDashboard, ArrowLeftRight, PieChart, Wallet, Settings, LogOut, Menu, X, RefreshCw, Target } from 'lucide-react'
 import { cn } from '../lib/utils'
 
-const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/transactions', icon: ArrowLeftRight, label: 'Transazioni' },
-  { to: '/budget', icon: PieChart, label: 'Budget' },
-  { to: '/accounts', icon: Wallet, label: 'Conti' },
-  { to: '/recurring', icon: RefreshCw, label: 'Ricorrenti' },
-  { to: '/goals', icon: Target, label: 'Obiettivi' },
-  { to: '/settings', icon: Settings, label: 'Impostazioni' },
+const ALL_NAV_ITEMS = [
+  { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard',    section: 'dashboard'    as const },
+  { to: '/transactions', icon: ArrowLeftRight,  label: 'Transazioni',  section: 'transactions' as const },
+  { to: '/budget',       icon: PieChart,        label: 'Budget',       section: 'budget'       as const },
+  { to: '/accounts',     icon: Wallet,          label: 'Conti',        section: 'accounts'     as const },
+  { to: '/recurring',    icon: RefreshCw,       label: 'Ricorrenti',   section: 'recurring'    as const },
+  { to: '/goals',        icon: Target,          label: 'Obiettivi',    section: 'goals'        as const },
+  { to: '/settings',     icon: Settings,        label: 'Impostazioni', section: 'settings'     as const },
 ]
 
 export default function Layout() {
-  const { profile, signOut } = useAuthStore()
+  const { profile, signOut, canAccessSection } = useAuthStore()
   const { loadAll } = useAppStore()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Filter nav items by role
+  const navItems = ALL_NAV_ITEMS.filter(item => canAccessSection(item.section))
 
   useEffect(() => {
     if (profile?.family_id) {
@@ -34,15 +37,32 @@ export default function Layout() {
     navigate('/auth')
   }
 
+  const roleBadge = () => {
+    const role = profile?.role
+    if (!role || role === 'admin') return null
+    const map: Record<string, { label: string; color: string }> = {
+      editor:    { label: 'Editor',     color: 'bg-purple-100 text-purple-700' },
+      viewer:    { label: 'Viewer',     color: 'bg-gray-100 text-gray-600' },
+      readonly:  { label: 'Readonly',   color: 'bg-slate-100 text-slate-600' },
+      dependent: { label: 'Dipendente', color: 'bg-orange-100 text-orange-700' },
+    }
+    const m = map[role]
+    if (!m) return null
+    return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m.color}`}>{m.label}</span>
+  }
+
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar desktop */}
       <aside className="hidden md:flex w-64 flex-col bg-white border-r border-gray-200 shadow-sm">
         <div className="p-6 border-b">
           <h1 className="text-xl font-bold text-primary">💰 FamilyBudget</h1>
-          <p className="text-xs text-muted-foreground mt-1">{profile?.full_name}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-muted-foreground truncate">{profile?.full_name || profile?.email}</p>
+            {roleBadge()}
+          </div>
         </div>
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to} className={({ isActive }) =>
               cn('flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
@@ -66,7 +86,10 @@ export default function Layout() {
 
       {/* Mobile header */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b px-4 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-bold text-primary">💰 FamilyBudget</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold text-primary">💰 FamilyBudget</h1>
+          {roleBadge()}
+        </div>
         <button onClick={() => setMobileOpen(!mobileOpen)}>
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
@@ -106,7 +129,7 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — show up to 4 accessible items */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex">
         {navItems.slice(0, 4).map(({ to, icon: Icon, label }) => (
           <NavLink key={to} to={to} className={({ isActive }) =>

@@ -8,9 +8,9 @@ export type Database = {
         Relationships: []
       }
       profiles: {
-        Row: { id: string; email: string; full_name: string | null; family_id: string | null; role: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; created_at: string }
-        Insert: { id: string; email: string; full_name?: string | null; family_id?: string | null; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; created_at?: string }
-        Update: { id?: string; email?: string; full_name?: string | null; family_id?: string | null; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; created_at?: string }
+        Row: { id: string; email: string; full_name: string | null; family_id: string | null; role: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; allowed_sections: string[] | null; pocket_money_limit: number | null; created_at: string }
+        Insert: { id: string; email: string; full_name?: string | null; family_id?: string | null; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; allowed_sections?: string[] | null; pocket_money_limit?: number | null; created_at?: string }
+        Update: { id?: string; email?: string; full_name?: string | null; family_id?: string | null; role?: 'admin' | 'editor' | 'viewer' | 'dependent' | 'readonly'; allowed_sections?: string[] | null; pocket_money_limit?: number | null; created_at?: string }
         Relationships: []
       }
       accounts: {
