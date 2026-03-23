@@ -28,7 +28,7 @@ $$;
 
 -- ── TRANSACTIONS ────────────────────────────────────────────
 
--- SELECT: dependent vede solo proprie transazioni
+DROP POLICY IF EXISTS "role_transactions_select" ON public.transactions;
 CREATE POLICY "role_transactions_select" ON public.transactions
   AS RESTRICTIVE
   FOR SELECT
@@ -40,7 +40,7 @@ CREATE POLICY "role_transactions_select" ON public.transactions
     END
   );
 
--- INSERT: solo admin/editor/dependent possono inserire
+DROP POLICY IF EXISTS "role_transactions_insert" ON public.transactions;
 CREATE POLICY "role_transactions_insert" ON public.transactions
   AS RESTRICTIVE
   FOR INSERT
@@ -49,7 +49,7 @@ CREATE POLICY "role_transactions_insert" ON public.transactions
     get_my_role() IN ('admin', 'editor', 'dependent')
   );
 
--- UPDATE: admin/editor = tutto; dependent = solo proprie
+DROP POLICY IF EXISTS "role_transactions_update" ON public.transactions;
 CREATE POLICY "role_transactions_update" ON public.transactions
   AS RESTRICTIVE
   FOR UPDATE
@@ -62,7 +62,7 @@ CREATE POLICY "role_transactions_update" ON public.transactions
     END
   );
 
--- DELETE: admin/editor = tutto; dependent = solo proprie
+DROP POLICY IF EXISTS "role_transactions_delete" ON public.transactions;
 CREATE POLICY "role_transactions_delete" ON public.transactions
   AS RESTRICTIVE
   FOR DELETE
@@ -77,18 +77,21 @@ CREATE POLICY "role_transactions_delete" ON public.transactions
 
 -- ── ACCOUNTS ────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "role_accounts_write" ON public.accounts;
 CREATE POLICY "role_accounts_write" ON public.accounts
   AS RESTRICTIVE
   FOR INSERT
   TO authenticated
   WITH CHECK (get_my_role() IN ('admin', 'editor'));
 
+DROP POLICY IF EXISTS "role_accounts_update" ON public.accounts;
 CREATE POLICY "role_accounts_update" ON public.accounts
   AS RESTRICTIVE
   FOR UPDATE
   TO authenticated
   USING (get_my_role() IN ('admin', 'editor'));
 
+DROP POLICY IF EXISTS "role_accounts_delete" ON public.accounts;
 CREATE POLICY "role_accounts_delete" ON public.accounts
   AS RESTRICTIVE
   FOR DELETE
@@ -97,18 +100,21 @@ CREATE POLICY "role_accounts_delete" ON public.accounts
 
 -- ── CATEGORIES ──────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "role_categories_write" ON public.categories;
 CREATE POLICY "role_categories_write" ON public.categories
   AS RESTRICTIVE
   FOR INSERT
   TO authenticated
   WITH CHECK (get_my_role() IN ('admin', 'editor'));
 
+DROP POLICY IF EXISTS "role_categories_update" ON public.categories;
 CREATE POLICY "role_categories_update" ON public.categories
   AS RESTRICTIVE
   FOR UPDATE
   TO authenticated
   USING (get_my_role() IN ('admin', 'editor'));
 
+DROP POLICY IF EXISTS "role_categories_delete" ON public.categories;
 CREATE POLICY "role_categories_delete" ON public.categories
   AS RESTRICTIVE
   FOR DELETE
@@ -177,7 +183,7 @@ CREATE POLICY "family_invites_delete" ON public.family_invites
 
 -- ── PROFILES: admin può aggiornare ruoli dei membri ──────────
 
--- Aggiunge policy per permettere all'admin di aggiornare i profili della propria famiglia
+DROP POLICY IF EXISTS "admin_update_family_profiles" ON public.profiles;
 CREATE POLICY "admin_update_family_profiles" ON public.profiles
   FOR UPDATE
   TO authenticated
