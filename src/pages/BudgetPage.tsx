@@ -3,6 +3,7 @@ import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2, X, ChevronDown, ChevronUp, Link } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts'
 
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 const MONTHS_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
@@ -220,6 +221,26 @@ export default function BudgetPage() {
     }
     return c
   }, [confronto, budgetCategories, curMonth])
+
+  // ── chart data for confronto tab (YTD per macrovoce)
+  const confrontoChartData = useMemo(() => {
+    return budgetCategories
+      .map((cat: any) => {
+        let budgetYTD = 0
+        let actualYTD = 0
+        for (let m = 0; m <= curMonth; m++) {
+          budgetYTD += confronto.budget[cat.id]?.[m] || 0
+          actualYTD += confronto.actual[cat.id]?.[m] || 0
+        }
+        return {
+          name: `${cat.icon || ''} ${cat.name}`,
+          preventivo: Math.round(budgetYTD),
+          consuntivo: Math.round(actualYTD),
+          color: cat.color || '#6366f1',
+        }
+      })
+      .filter(d => d.preventivo > 0 || d.consuntivo > 0)
+  }, [budgetCategories, confronto, curMonth])
 
   const semaforoClass = (b: number, a: number) => {
     if (b === 0) return 'text-gray-400'
@@ -581,6 +602,38 @@ export default function BudgetPage() {
             <button onClick={openMapping} className="text-xs text-gray-500 flex items-center gap-1 hover:text-gray-700">
               <Link className="h-3 w-3" /> Modifica mapping categorie
             </button>
+          )}
+
+          {/* Charts — YTD per macrovoce */}
+          {confrontoChartData.length > 0 && (
+            <div className="bg-white rounded-xl border shadow-sm p-4">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">
+                Preventivo vs Consuntivo YTD (gen–{MONTHS_IT[curMonth]})
+              </h3>
+              <ResponsiveContainer width="100%" height={confrontoChartData.length * 52 + 40}>
+                <BarChart
+                  data={confrontoChartData}
+                  layout="vertical"
+                  margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `€${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                  <Legend />
+                  <Bar dataKey="preventivo" name="Preventivo" fill="#93c5fd" radius={[0, 3, 3, 0]} barSize={12}>
+                    {confrontoChartData.map((_, index) => (
+                      <Cell key={`prev-${index}`} fill="#93c5fd" />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="consuntivo" name="Consuntivo" fill="#f87171" radius={[0, 3, 3, 0]} barSize={12}>
+                    {confrontoChartData.map((entry, index) => (
+                      <Cell key={`cons-${index}`} fill={entry.consuntivo > entry.preventivo ? '#ef4444' : '#4ade80'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
 
           {/* Month selector */}

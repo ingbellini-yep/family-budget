@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useAppStore } from '../store/appStore'
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, ArrowLeftRight, PieChart, Wallet, Settings, LogOut, Menu, X } from 'lucide-react'
+import { LayoutDashboard, ArrowLeftRight, PieChart, Wallet, Settings, LogOut, Menu, X, RefreshCw, Target } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const navItems = [
@@ -10,6 +10,8 @@ const navItems = [
   { to: '/transactions', icon: ArrowLeftRight, label: 'Transazioni' },
   { to: '/budget', icon: PieChart, label: 'Budget' },
   { to: '/accounts', icon: Wallet, label: 'Conti' },
+  { to: '/recurring', icon: RefreshCw, label: 'Ricorrenti' },
+  { to: '/goals', icon: Target, label: 'Obiettivi' },
   { to: '/settings', icon: Settings, label: 'Impostazioni' },
 ]
 
