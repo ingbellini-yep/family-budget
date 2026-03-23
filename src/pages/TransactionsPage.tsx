@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate } from '../lib/utils'
@@ -14,12 +14,13 @@ const txSchema = z.object({
   description: z.string().min(1, 'Obbligatorio'),
   category_id: z.string().min(1, 'Obbligatorio'),
   account_id: z.string().min(1, 'Obbligatorio'),
+  budget_category_id: z.string().optional(),
   note: z.string().optional(),
 })
 type TxForm = z.infer<typeof txSchema>
 
 export default function TransactionsPage() {
-  const { transactions, categories, accounts, addTransaction, deleteTransaction, selectedMonth, selectedYear } = useAppStore()
+  const { transactions, categories, accounts, budgetCategories, categoryBudgetMappings, addTransaction, deleteTransaction, selectedMonth, selectedYear } = useAppStore()
   const { profile } = useAuthStore()
   const [showModal, setShowModal] = useState(false)
   const [filterType, setFilterType] = useState<'all' | 'entrata' | 'uscita'>('all')
@@ -51,6 +52,7 @@ export default function TransactionsPage() {
     if (!profile?.family_id) return
     const { error } = await addTransaction({
       ...data,
+      budget_category_id: data.budget_category_id || null,
       family_id: profile.family_id,
       created_by: profile.id,
       source: 'manuale',
@@ -80,7 +82,16 @@ export default function TransactionsPage() {
   const getAccountName = (id: string) => accounts.find(a => a.id === id)?.name || '-'
 
   const watchType = form.watch('type')
+  const watchCategoryId = form.watch('category_id')
   const filteredCategories = categories.filter(c => c.type === watchType || c.type === 'risparmio')
+
+  // Auto-suggest macro categoria when category changes
+  useEffect(() => {
+    if (watchCategoryId) {
+      const mapping = categoryBudgetMappings.find((m: any) => m.transaction_category_id === watchCategoryId)
+      form.setValue('budget_category_id', mapping?.budget_category_id || '')
+    }
+  }, [watchCategoryId, categoryBudgetMappings])
 
   return (
     <div className="p-4 md:p-6 pb-20 md:pb-6">
@@ -293,6 +304,24 @@ export default function TransactionsPage() {
                   {form.formState.errors.account_id && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.account_id.message}</p>}
                 </div>
               </div>
+
+              {budgetCategories.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700 flex items-center gap-1">
+                    Macro categoria
+                    <span className="text-gray-400 font-normal">(auto-suggerita)</span>
+                  </label>
+                  <select
+                    {...form.register('budget_category_id')}
+                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
+                  >
+                    <option value="">— Non classificata —</option>
+                    {budgetCategories.map((bc: any) => (
+                      <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-medium text-gray-700">Note (opzionale)</label>

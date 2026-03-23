@@ -111,6 +111,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().loadBudgets(familyId, selectedYear),
       get().loadRecurringExpenses(familyId),
       get().loadSavingsGoals(familyId),
+      get().loadBudgetCategories(familyId),
+      get().loadCategoryBudgetMappings(familyId),
     ])
     set({ loading: false })
   },

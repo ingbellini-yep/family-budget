@@ -88,12 +88,12 @@ const defaultForm = (): {
   type: ItemType; description: string; budget_category_id: string | null
   recurrence: Recurrence; recurrence_month: number | null; recurrence_date: string
   amount: string; is_variable: boolean; notes: string; active: boolean
-  target_amount: string; target_date: string; account_id: string | null
+  target_amount: string; target_date: string; planned_account_id: string | null
 } => ({
   type: 'expense', description: '', budget_category_id: null,
   recurrence: 'monthly', recurrence_month: null, recurrence_date: '',
   amount: '', is_variable: false, notes: '', active: true,
-  target_amount: '', target_date: '', account_id: null,
+  target_amount: '', target_date: '', planned_account_id: null,
 })
 
 export default function BudgetPage() {
@@ -183,7 +183,8 @@ export default function BudgetPage() {
       budget[cat.id] = new Array(12).fill(0)
     })
     yearTransactions.forEach((tx: any) => {
-      const bcId = txMap[tx.category_id]
+      // Prefer direct budget_category_id on transaction, fallback to mapping
+      const bcId = tx.budget_category_id || txMap[tx.category_id]
       if (!bcId || !actual[bcId]) return
       const m = new Date(tx.date + 'T00:00:00').getMonth()
       actual[bcId][m] += tx.type === 'uscita' ? Number(tx.amount) : -Number(tx.amount)
@@ -244,7 +245,7 @@ export default function BudgetPage() {
       recurrence_date: item.recurrence_date || '', amount: String(item.amount),
       is_variable: !!item.is_variable, notes: item.notes || '', active: item.active !== false,
       target_amount: String(item.target_amount || ''), target_date: item.target_date || '',
-      account_id: item.account_id || null,
+      planned_account_id: item.planned_account_id || null,
     })
     setItemModal({ mode: 'edit', item })
   }
@@ -254,6 +255,7 @@ export default function BudgetPage() {
     const payload: any = {
       family_id: profile.family_id, year: viewYear, type: itemForm.type,
       description: itemForm.description.trim(), budget_category_id: itemForm.budget_category_id,
+      planned_account_id: itemForm.planned_account_id,
       recurrence: itemForm.recurrence, recurrence_month: itemForm.recurrence_month,
       recurrence_date: itemForm.recurrence_date || null,
       amount: parseFloat(itemForm.amount) || 0,
@@ -262,7 +264,6 @@ export default function BudgetPage() {
     if (itemForm.type === 'saving_goal') {
       payload.target_amount = parseFloat(itemForm.target_amount) || null
       payload.target_date = itemForm.target_date || null
-      payload.account_id = itemForm.account_id
     }
     if (itemModal?.mode === 'edit' && itemModal.item) await updateBudgetItem(itemModal.item.id, payload)
     else await addBudgetItem(payload)
@@ -793,6 +794,15 @@ export default function BudgetPage() {
                   <span className={`absolute top-0.5 left-0.5 h-4 w-4 bg-white rounded-full shadow transition-transform ${itemForm.is_variable ? 'translate-x-5' : ''}`} />
                 </button>
               </div>
+              {/* Conto previsto — per tutte le voci */}
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Conto previsto</label>
+                <select value={itemForm.planned_account_id || ''} onChange={e => setItemForm(f => ({ ...f, planned_account_id: e.target.value || null }))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
+                  <option value="">— Non assegnato —</option>
+                  {accounts.map((acc: any) => <option key={acc.id} value={acc.id}>{acc.icon ? acc.icon + ' ' : ''}{acc.name}</option>)}
+                </select>
+              </div>
               {itemForm.type === 'saving_goal' && (
                 <>
                   <div>
@@ -804,14 +814,6 @@ export default function BudgetPage() {
                     <label className="text-xs font-medium text-gray-700 block mb-1">Data target</label>
                     <input type="date" value={itemForm.target_date} onChange={e => setItemForm(f => ({ ...f, target_date: e.target.value }))}
                       className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Conto di destinazione</label>
-                    <select value={itemForm.account_id || ''} onChange={e => setItemForm(f => ({ ...f, account_id: e.target.value || null }))}
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
-                      <option value="">— Nessuno —</option>
-                      {accounts.map((acc: any) => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
-                    </select>
                   </div>
                 </>
               )}
