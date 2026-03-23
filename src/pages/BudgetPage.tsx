@@ -3,7 +3,7 @@ import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2, X, ChevronDown, ChevronUp, Link } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
 
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 const MONTHS_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
@@ -242,6 +242,82 @@ export default function BudgetPage() {
       .filter(d => d.preventivo > 0 || d.consuntivo > 0)
   }, [budgetCategories, confronto, curMonth])
 
+  // ── grafici di sintesi (sezione 6.5 REV03)
+  const [chartsView, setChartsView] = useState<'preventivo' | 'consuntivo'>('preventivo')
+
+  // helper: shade di un hex in base all'indice (da colore base a versione più chiara)
+  const hexToRgba = (hex: string, alpha: number) => {
+    const r = parseInt((hex || '#6366f1').slice(1, 3), 16)
+    const g = parseInt((hex || '#6366f1').slice(3, 5), 16)
+    const b = parseInt((hex || '#6366f1').slice(5, 7), 16)
+    return `rgba(${r},${g},${b},${alpha})`
+  }
+
+  // Pie 1: spese per conto (preventivo = planned_account_id, consuntivo = account_id su tx)
+  const pieDataByConto = useMemo(() => {
+    const spendItems = [...expenseItems, ...savingItems]
+    if (chartsView === 'preventivo') {
+      const map: Record<string, { name: string; value: number; color: string }> = {}
+      accounts.forEach((a: any) => {
+        const total = spendItems.filter((i: any) => i.planned_account_id === a.id).reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+        if (total > 0) map[a.id] = { name: a.name, value: Math.round(total), color: a.color || '#94a3b8' }
+      })
+      const nonAssigned = spendItems.filter((i: any) => !i.planned_account_id).reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+      const result = Object.values(map).sort((a, b) => b.value - a.value)
+      if (nonAssigned > 0) result.push({ name: 'Non assegnato', value: Math.round(nonAssigned), color: '#cbd5e1' })
+      return result
+    } else {
+      const map: Record<string, { name: string; value: number; color: string }> = {}
+      yearTransactions.filter((tx: any) => tx.type === 'uscita').forEach((tx: any) => {
+        const acc = accounts.find((a: any) => a.id === tx.account_id)
+        if (!acc) return
+        if (!map[acc.id]) map[acc.id] = { name: acc.name, value: 0, color: acc.color || '#94a3b8' }
+        map[acc.id].value += Number(tx.amount)
+      })
+      return Object.values(map).map(d => ({ ...d, value: Math.round(d.value) })).sort((a, b) => b.value - a.value)
+    }
+  }, [expenseItems, savingItems, accounts, yearTransactions, chartsView])
+
+  // Pie 2: spese per macro categoria
+  const pieDataByMacro = useMemo(() => {
+    if (chartsView === 'preventivo') {
+      return budgetCategories
+        .map((cat: any) => {
+          const total = [...expenseItems, ...savingItems]
+            .filter((i: any) => i.budget_category_id === cat.id)
+            .reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+          return { name: `${cat.icon || ''} ${cat.name}`, value: Math.round(total), color: cat.color || '#6366f1' }
+        })
+        .filter(d => d.value > 0)
+        .sort((a, b) => b.value - a.value)
+    } else {
+      const txMap: Record<string, string> = {}
+      categoryBudgetMappings.forEach((m: any) => { txMap[m.transaction_category_id] = m.budget_category_id })
+      const map: Record<string, { name: string; value: number; color: string }> = {}
+      yearTransactions.filter((tx: any) => tx.type === 'uscita').forEach((tx: any) => {
+        const bcId = tx.budget_category_id || txMap[tx.category_id]
+        if (!bcId) return
+        const cat = budgetCategories.find((c: any) => c.id === bcId)
+        if (!cat) return
+        if (!map[bcId]) map[bcId] = { name: `${cat.icon || ''} ${cat.name}`, value: 0, color: cat.color || '#6366f1' }
+        map[bcId].value += Number(tx.amount)
+      })
+      return Object.values(map).map(d => ({ ...d, value: Math.round(d.value) })).sort((a, b) => b.value - a.value)
+    }
+  }, [expenseItems, savingItems, budgetCategories, yearTransactions, categoryBudgetMappings, chartsView])
+
+  // Chart 3: dati per stacked bar (voci per macro categoria)
+  const stackedBarData = useMemo(() =>
+    budgetCategories
+      .map((cat: any) => {
+        const items = [...expenseItems, ...savingItems].filter((i: any) => i.budget_category_id === cat.id)
+        const catTotal = items.reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+        return { cat, items, catTotal }
+      })
+      .filter(d => d.catTotal > 0)
+      .sort((a, b) => b.catTotal - a.catTotal)
+  , [expenseItems, savingItems, budgetCategories])
+
   const semaforoClass = (b: number, a: number) => {
     if (b === 0) return 'text-gray-400'
     const p = a / b
@@ -465,6 +541,157 @@ export default function BudgetPage() {
               )}
             </div>
           </div>
+
+          {/* D - GRAFICI DI SINTESI */}
+          {(expenseTotal + savingTotal) > 0 && (
+            <div className="space-y-4">
+              {/* Header + toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-base">📊</span>
+                <h2 className="font-semibold text-gray-700 text-sm">D · Grafici di Sintesi {viewYear}</h2>
+                <div className="flex gap-1 ml-auto bg-gray-100 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setChartsView('preventivo')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${chartsView === 'preventivo' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                  >Preventivo</button>
+                  <button
+                    onClick={() => setChartsView('consuntivo')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${chartsView === 'consuntivo' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                  >Consuntivo</button>
+                </div>
+              </div>
+
+              {/* Riga 1: due torte affiancate */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Torta 1 — per conto */}
+                <div className="bg-white rounded-xl border shadow-sm p-4">
+                  <h3 className="text-xs font-semibold text-gray-600 mb-3">
+                    🏦 Spese per conto — {chartsView === 'preventivo' ? 'Preventivo' : `Consuntivo ${MONTHS_IT[0]}–${MONTHS_IT[curMonth]}`}
+                  </h3>
+                  {pieDataByConto.length === 0 ? (
+                    <div className="h-40 flex items-center justify-center text-xs text-gray-400">
+                      {chartsView === 'preventivo' ? 'Assegna un conto alle voci di spesa' : 'Nessuna transazione registrata'}
+                    </div>
+                  ) : (
+                    <>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <PieChart>
+                          <Pie data={pieDataByConto} dataKey="value" cx="50%" cy="50%" outerRadius={70} labelLine={false}>
+                            {pieDataByConto.map((entry, index) => <Cell key={`c1-${index}`} fill={entry.color} />)}
+                          </Pie>
+                          <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="space-y-1 mt-2">
+                        {pieDataByConto.map((d, i) => {
+                          const total = pieDataByConto.reduce((s, x) => s + x.value, 0)
+                          const pct = total > 0 ? Math.round((d.value / total) * 100) : 0
+                          return (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                              <span className="flex-1 truncate text-gray-600">{d.name}</span>
+                              <span className="text-gray-400">{pct}%</span>
+                              <span className="font-medium text-gray-700">{formatCurrency(d.value)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Torta 2 — per macro categoria */}
+                <div className="bg-white rounded-xl border shadow-sm p-4">
+                  <h3 className="text-xs font-semibold text-gray-600 mb-3">
+                    🏷️ Spese per macro categoria — {chartsView === 'preventivo' ? 'Preventivo' : `Consuntivo ${MONTHS_IT[0]}–${MONTHS_IT[curMonth]}`}
+                  </h3>
+                  {pieDataByMacro.length === 0 ? (
+                    <div className="h-40 flex items-center justify-center text-xs text-gray-400">
+                      {chartsView === 'preventivo' ? 'Nessuna voce di spesa' : 'Nessuna transazione con macro categoria'}
+                    </div>
+                  ) : (
+                    <>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <PieChart>
+                          <Pie data={pieDataByMacro} dataKey="value" cx="50%" cy="50%" outerRadius={70} labelLine={false}>
+                            {pieDataByMacro.map((entry, index) => <Cell key={`c2-${index}`} fill={entry.color} />)}
+                          </Pie>
+                          <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="space-y-1 mt-2">
+                        {pieDataByMacro.map((d, i) => {
+                          const total = pieDataByMacro.reduce((s, x) => s + x.value, 0)
+                          const pct = total > 0 ? Math.round((d.value / total) * 100) : 0
+                          return (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                              <span className="flex-1 truncate text-gray-600">{d.name}</span>
+                              <span className="text-gray-400">{pct}%</span>
+                              <span className="font-medium text-gray-700">{formatCurrency(d.value)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Riga 2: barre stacked con voci per macro categoria */}
+              {stackedBarData.length > 0 && (
+                <div className="bg-white rounded-xl border shadow-sm p-4">
+                  <h3 className="text-xs font-semibold text-gray-600 mb-4">
+                    📊 Dettaglio voci per macro categoria — Preventivo {viewYear}
+                  </h3>
+                  <div className="space-y-3">
+                    {stackedBarData.map(({ cat, items, catTotal }) => (
+                      <div key={cat.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm">{cat.icon || '📦'}</span>
+                            <span className="text-xs font-semibold text-gray-700">{cat.name}</span>
+                          </div>
+                          <span className="text-xs font-semibold" style={{ color: cat.color || '#6366f1' }}>{formatCurrency(catTotal)}</span>
+                        </div>
+                        {/* Segmented bar */}
+                        <div className="flex h-6 rounded-lg overflow-hidden gap-px">
+                          {items.map((item: any, idx: number) => {
+                            const pct = catTotal > 0 ? (getAnnualAmount(item) / catTotal) * 100 : 0
+                            if (pct < 0.5) return null
+                            const alpha = 0.45 + (idx / Math.max(items.length - 1, 1)) * 0.55
+                            return (
+                              <div
+                                key={item.id}
+                                title={`${item.description}: ${formatCurrency(getAnnualAmount(item))} (${Math.round(pct)}%)`}
+                                className="cursor-help transition-opacity hover:opacity-80"
+                                style={{ width: `${pct}%`, backgroundColor: hexToRgba(cat.color || '#6366f1', alpha), minWidth: 4 }}
+                              />
+                            )
+                          })}
+                        </div>
+                        {/* Legenda voci */}
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                          {items.map((item: any, idx: number) => {
+                            const annual = getAnnualAmount(item)
+                            const pct = catTotal > 0 ? Math.round((annual / catTotal) * 100) : 0
+                            const alpha = 0.45 + (idx / Math.max(items.length - 1, 1)) * 0.55
+                            return (
+                              <div key={item.id} className="flex items-center gap-1 text-[10px] text-gray-500">
+                                <div className="h-2 w-2 rounded-sm flex-shrink-0" style={{ backgroundColor: hexToRgba(cat.color || '#6366f1', alpha) }} />
+                                <span className="truncate max-w-[120px]">{item.description}</span>
+                                <span className="text-gray-400">({pct}%)</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
