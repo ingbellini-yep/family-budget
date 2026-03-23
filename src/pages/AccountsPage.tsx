@@ -3,7 +3,8 @@ import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate } from '../lib/utils'
 import { supabase } from '../lib/supabase'
-import { Plus, X, CreditCard, Wallet, TrendingUp, PiggyBank, Edit2, Trash2, PowerOff } from 'lucide-react'
+import { Plus, X, CreditCard, Wallet, TrendingUp, PiggyBank, Edit2, Trash2, PowerOff, FileDown } from 'lucide-react'
+import { exportEstrattoConto } from '../lib/usePDFExport'
 
 const typeIcons: Record<string, any> = {
   corrente: Wallet, carta: CreditCard, investimento: TrendingUp, risparmio: PiggyBank,
@@ -28,6 +29,12 @@ export default function AccountsPage() {
   const [form, setForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [estrattoModal, setEstrattoModal] = useState<{ account: any } | null>(null)
+  const [estrattoFrom, setEstrattoFrom] = useState(() => {
+    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
+  })
+  const [estrattoTo, setEstrattoTo] = useState(() => new Date().toISOString().split('T')[0])
+  const [estrattoLoading, setEstrattoLoading] = useState(false)
 
   const activeAccounts = useMemo(() => accounts.filter((a: any) => a.active !== false), [accounts])
   const inactiveAccounts = useMemo(() => accounts.filter((a: any) => a.active === false), [accounts])
@@ -98,6 +105,34 @@ export default function AccountsPage() {
     await loadAccounts(profile.family_id)
   }
 
+  const handleExportEstratto = async () => {
+    if (!estrattoModal || !profile?.family_id) return
+    setEstrattoLoading(true)
+    try {
+      const { data: txs } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('family_id', profile.family_id)
+        .eq('account_id', estrattoModal.account.id)
+        .gte('date', estrattoFrom)
+        .lte('date', estrattoTo)
+        .order('date', { ascending: true })
+      await exportEstrattoConto({
+        account: estrattoModal.account,
+        familyName: profile.email || '',
+        transactions: txs || [],
+        categories,
+        fromDate: estrattoFrom,
+        toDate: estrattoTo,
+      })
+      setEstrattoModal(null)
+    } catch (e) {
+      alert('Errore durante la generazione del PDF.')
+    } finally {
+      setEstrattoLoading(false)
+    }
+  }
+
   const AccountCard = ({ account }: { account: any }) => {
     const Icon = typeIcons[account.type] || Wallet
     const recentTx = getAccountTxs(account.id)
@@ -133,7 +168,7 @@ export default function AccountsPage() {
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-1.5 mt-3 pt-3 border-t">
+          <div className="flex items-center gap-1.5 mt-3 pt-3 border-t flex-wrap">
             <button onClick={() => openEdit(account)}
               className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded-lg hover:bg-gray-100">
               <Edit2 className="h-3.5 w-3.5" /> Modifica
@@ -142,6 +177,10 @@ export default function AccountsPage() {
               className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg hover:bg-gray-100 ${inactive ? 'text-green-600 hover:text-green-700' : 'text-gray-500 hover:text-gray-700'}`}>
               <PowerOff className="h-3.5 w-3.5" />
               {inactive ? 'Riattiva' : 'Disattiva'}
+            </button>
+            <button onClick={() => setEstrattoModal({ account })}
+              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">
+              <FileDown className="h-3.5 w-3.5" /> Estratto PDF
             </button>
             <button onClick={() => handleDelete(account)}
               className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded-lg hover:bg-red-50 ml-auto">
@@ -313,6 +352,47 @@ export default function AccountsPage() {
               <button onClick={handleSave} disabled={saving || !form.name.trim()}
                 className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
                 {saving ? 'Salvataggio...' : 'Salva'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Estratto Conto Modal */}
+      {estrattoModal && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-semibold text-sm">📄 Estratto Conto PDF</h2>
+              <button onClick={() => setEstrattoModal(null)}><X className="h-5 w-5 text-gray-400" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="bg-blue-50 rounded-xl p-3">
+                <div className="font-medium text-blue-800 text-sm">{estrattoModal.account.name}</div>
+                <div className="text-xs text-blue-600 mt-0.5">{estrattoModal.account.type} · Saldo {formatCurrency(estrattoModal.account.balance || 0)}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Da data</label>
+                  <input type="date" value={estrattoFrom} onChange={e => setEstrattoFrom(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">A data</label>
+                  <input type="date" value={estrattoTo} onChange={e => setEstrattoTo(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">Il PDF includerà tutte le transazioni del conto nel periodo selezionato con saldo progressivo.</p>
+            </div>
+            <div className="flex gap-3 p-4 border-t">
+              <button onClick={() => setEstrattoModal(null)} className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Annulla
+              </button>
+              <button onClick={handleExportEstratto} disabled={estrattoLoading || !estrattoFrom || !estrattoTo}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                <FileDown className="h-4 w-4" />
+                {estrattoLoading ? 'Generazione...' : 'Scarica PDF'}
               </button>
             </div>
           </div>

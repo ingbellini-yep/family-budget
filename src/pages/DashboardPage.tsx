@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
@@ -10,12 +10,14 @@ import {
   LineChart, Line
 } from 'recharts'
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, ChevronLeft, ChevronRight } from 'lucide-react'
+import PDFExportButton from '../components/PDFExportButton'
+import { exportDashboardSnapshot, exportTrackingMensile } from '../lib/usePDFExport'
 
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 const MONTH_NAMES = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
 
 export default function DashboardPage() {
-  const { transactions, categories, budgets, selectedMonth, selectedYear, setSelectedMonth, setSelectedYear, loadTransactions } = useAppStore()
+  const { transactions, categories, budgets, accounts, selectedMonth, selectedYear, setSelectedMonth, setSelectedYear, loadTransactions } = useAppStore()
   const { profile } = useAuthStore()
   const [historicalData, setHistoricalData] = useState<any[]>([])
 
@@ -94,8 +96,36 @@ export default function DashboardPage() {
     if (profile?.family_id) loadTransactions(profile.family_id, selectedMonth === 12 ? selectedYear + 1 : selectedYear, selectedMonth === 12 ? 1 : selectedMonth + 1)
   }
 
+  const dashboardRef = useRef<HTMLDivElement>(null)
+
   const statusColors: Record<'green' | 'yellow' | 'red', string> = { green: 'bg-green-100 text-green-700', yellow: 'bg-yellow-100 text-yellow-700', red: 'bg-red-100 text-red-700' }
   const barStatusColors: Record<'green' | 'yellow' | 'red', string> = { green: 'bg-green-500', yellow: 'bg-yellow-500', red: 'bg-red-500' }
+
+  const pdfOptions = [
+    {
+      label: 'Snapshot Dashboard',
+      description: 'Cattura grafica della pagina corrente',
+      onExport: () => exportDashboardSnapshot({
+        year: selectedYear,
+        month: selectedMonth,
+        familyName: profile?.email || '',
+        dashboardEl: dashboardRef.current!,
+      }),
+    },
+    {
+      label: 'Tracking Mensile',
+      description: `Dettaglio transazioni ${MONTH_NAMES[selectedMonth - 1]}`,
+      onExport: () => exportTrackingMensile({
+        year: selectedYear,
+        month: selectedMonth,
+        familyName: profile?.email || '',
+        transactions,
+        categories,
+        accounts,
+        budgets,
+      }),
+    },
+  ]
 
   return (
     <div className="p-4 md:p-6 space-y-6 pb-20 md:pb-6">
@@ -105,21 +135,24 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-sm text-muted-foreground">Panoramica finanziaria</p>
         </div>
-        <div className="flex items-center gap-2 bg-white border rounded-xl px-3 py-2 shadow-sm">
-          <button onClick={prevMonth} className="text-gray-400 hover:text-gray-700">
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <span className="text-sm font-medium min-w-[120px] text-center">
-            {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-          </span>
-          <button onClick={nextMonth} className="text-gray-400 hover:text-gray-700">
-            <ChevronRight className="h-4 w-4" />
-          </button>
+        <div className="flex items-center gap-2">
+          <PDFExportButton options={pdfOptions} label="PDF" size="sm" />
+          <div className="flex items-center gap-2 bg-white border rounded-xl px-3 py-2 shadow-sm">
+            <button onClick={prevMonth} className="text-gray-400 hover:text-gray-700">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-sm font-medium min-w-[120px] text-center">
+              {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+            </span>
+            <button onClick={nextMonth} className="text-gray-400 hover:text-gray-700">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div ref={dashboardRef} className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl p-4 shadow-sm border">
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp className="h-4 w-4 text-green-500" />

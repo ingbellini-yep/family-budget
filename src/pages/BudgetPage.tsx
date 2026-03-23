@@ -1,10 +1,12 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { supabase } from '../lib/supabase'
 import { formatCurrency } from '../lib/utils'
 import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2, X, ChevronDown, ChevronUp, Link, AlertTriangle, TrendingUp, TrendingDown, Sliders } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts'
+import PDFExportButton from '../components/PDFExportButton'
+import { exportBudgetCompleto, exportBudgetPerConto, exportBudgetPerCategoria, exportTrackingAnnuale } from '../lib/usePDFExport'
 
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 const MONTHS_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
@@ -426,6 +428,57 @@ export default function BudgetPage() {
     const p = a / b; if (p <= 0.9) return '🟢'; if (p <= 1.1) return '🟡'; return '🔴'
   }
 
+  // ── PDF Export refs & handlers
+  const chartsRef = useRef<HTMLDivElement>(null)
+
+  const pdfOptions = [
+    {
+      label: 'Budget Completo',
+      description: 'Cover, grafici, voci e tabella mensile',
+      onExport: () => exportBudgetCompleto({
+        year: viewYear,
+        familyName: profile?.email || '',
+        budgetCategories,
+        budgetItems,
+        accounts,
+        plannedTransfers,
+        chartsRef: chartsRef.current,
+      }),
+    },
+    {
+      label: 'Per Conto',
+      description: 'Fabbisogno e voci per ogni conto',
+      onExport: () => exportBudgetPerConto({
+        year: viewYear,
+        familyName: profile?.email || '',
+        budgetItems,
+        accounts,
+        plannedTransfers,
+      }),
+    },
+    {
+      label: 'Per Categoria',
+      description: 'Dettaglio voci per macrovoce',
+      onExport: () => exportBudgetPerCategoria({
+        year: viewYear,
+        familyName: profile?.email || '',
+        budgetCategories,
+        budgetItems,
+      }),
+    },
+    {
+      label: 'Tracking Annuale',
+      description: 'Consuntivo mensile e per categoria',
+      onExport: () => exportTrackingAnnuale({
+        year: viewYear,
+        familyName: profile?.email || '',
+        yearTransactions,
+        budgetItems,
+        categories,
+      }),
+    },
+  ]
+
   // ── handlers
   const openAddItem = (defaultType: ItemType = 'expense', defaultCatId?: string) => {
     const f = defaultForm(); f.type = defaultType; f.budget_category_id = defaultCatId || null
@@ -507,10 +560,13 @@ export default function BudgetPage() {
           <h1 className="text-2xl font-bold text-gray-900">Budget</h1>
           <p className="text-sm text-gray-500">Pianificazione e controllo</p>
         </div>
-        <div className="flex items-center gap-2 bg-white border rounded-xl px-3 py-2 shadow-sm">
-          <button onClick={() => setViewYear(y => y - 1)} className="text-gray-400 hover:text-gray-700"><ChevronLeft className="h-4 w-4" /></button>
-          <span className="text-sm font-semibold w-12 text-center">{viewYear}</span>
-          <button onClick={() => setViewYear(y => y + 1)} className="text-gray-400 hover:text-gray-700"><ChevronRight className="h-4 w-4" /></button>
+        <div className="flex items-center gap-2">
+          <PDFExportButton options={pdfOptions} label="PDF" size="sm" />
+          <div className="flex items-center gap-2 bg-white border rounded-xl px-3 py-2 shadow-sm">
+            <button onClick={() => setViewYear(y => y - 1)} className="text-gray-400 hover:text-gray-700"><ChevronLeft className="h-4 w-4" /></button>
+            <span className="text-sm font-semibold w-12 text-center">{viewYear}</span>
+            <button onClick={() => setViewYear(y => y + 1)} className="text-gray-400 hover:text-gray-700"><ChevronRight className="h-4 w-4" /></button>
+          </div>
         </div>
       </div>
 
@@ -804,7 +860,7 @@ export default function BudgetPage() {
 
           {/* D - GRAFICI DI SINTESI */}
           {(expenseTotal + savingTotal) > 0 && (
-            <div className="space-y-4">
+            <div ref={chartsRef} className="space-y-4">
               {/* Header + toggle */}
               <div className="flex items-center gap-2">
                 <span className="text-base">📊</span>
