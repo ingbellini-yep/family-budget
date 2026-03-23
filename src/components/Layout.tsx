@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useAppStore } from '../store/appStore'
 import { useEffect, useState } from 'react'
@@ -18,7 +18,6 @@ const ALL_NAV_ITEMS = [
 export default function Layout() {
   const { profile, signOut, canAccessSection } = useAuthStore()
   const { loadAll } = useAppStore()
-  const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   // Filter nav items by role
@@ -28,13 +27,14 @@ export default function Layout() {
     if (profile?.family_id) {
       loadAll(profile.family_id)
     } else if (profile && !profile.family_id) {
-      navigate('/setup')
+      window.location.href = '/setup'
     }
   }, [profile?.family_id])
 
   const handleSignOut = async () => {
     await signOut()
-    navigate('/auth')
+    // Hard redirect: clears all React state, Zustand stores, and cached data
+    window.location.href = '/auth'
   }
 
   const roleBadge = () => {

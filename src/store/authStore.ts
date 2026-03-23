@@ -67,15 +67,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     await supabase.auth.signOut()
-    set({ user: null, profile: null })
+    set({ user: null, profile: null, loading: false })
   },
 
   loadProfile: async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { set({ loading: false }); return }
-    set({ user })
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-    set({ profile: profile ? { ...profile, role: profile.role || 'admin' } : null, loading: false })
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { set({ user: null, loading: false }); return }
+      set({ user })
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      set({ profile: profile ? { ...profile, role: profile.role || 'admin' } : null, loading: false })
+    } catch {
+      set({ loading: false })
+    }
   },
 
   isAdmin: () => get().profile?.role === 'admin',
