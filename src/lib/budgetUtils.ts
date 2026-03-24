@@ -1,6 +1,6 @@
 // ─── Budget utilities shared across BudgetPage and PDF export ──────────────
 
-export type Recurrence = 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly'
+export type Recurrence = 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly' | 'mesi_specifici'
 
 export const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 export const MONTHS_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
@@ -28,6 +28,13 @@ export function getMonthlyAmounts(item: any): number[] {
       for (let i = 0; i < 4; i++) amounts[(start + i * 3) % 12] = amt
       return amounts
     }
+    case 'mesi_specifici': {
+      const months: number[] = Array.isArray(item.recurrence_months) ? item.recurrence_months : []
+      for (const m of months) {
+        if (m >= 1 && m <= 12) amounts[m - 1] = amt
+      }
+      return amounts
+    }
     default: return amounts
   }
 }
@@ -37,8 +44,9 @@ export function getAnnualAmount(item: any): number {
 }
 
 export function getRecurrenceLabel(item: any): string {
-  const labels: Record<Recurrence, string> = {
-    monthly: 'Mensile', weekly: 'Settimanale', annual: 'Annuale', once: 'Una tantum', quarterly: 'Trimestrale',
+  const labels: Record<string, string> = {
+    monthly: 'Mensile', weekly: 'Settimanale', annual: 'Annuale',
+    once: 'Una tantum', quarterly: 'Trimestrale', mesi_specifici: 'Mesi specifici',
   }
   const base = labels[item.recurrence as Recurrence] || item.recurrence
   if (item.recurrence === 'annual' && item.recurrence_month)
@@ -51,6 +59,14 @@ export function getRecurrenceLabel(item: any): string {
       return `${base} (${d.toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })})`
     }
     if (item.recurrence_month) return `${base} (${MONTHS_IT[item.recurrence_month - 1]})`
+  }
+  if (item.recurrence === 'mesi_specifici') {
+    const months: number[] = Array.isArray(item.recurrence_months) ? item.recurrence_months : []
+    if (months.length > 0) {
+      const sorted = [...months].sort((a, b) => a - b)
+      return sorted.map(m => MONTHS_IT[m - 1]).join(', ')
+    }
+    return base
   }
   return base
 }

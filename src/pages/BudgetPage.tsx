@@ -11,7 +11,7 @@ import { exportBudgetCompleto, exportBudgetPerConto, exportBudgetPerCategoria, e
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 const MONTHS_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
 
-type Recurrence = 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly'
+type Recurrence = 'weekly' | 'monthly' | 'annual' | 'once' | 'quarterly' | 'mesi_specifici'
 type ItemType = 'income' | 'expense' | 'saving_goal'
 
 function getMonthlyAmounts(item: any): number[] {
@@ -37,6 +37,11 @@ function getMonthlyAmounts(item: any): number[] {
       for (let i = 0; i < 4; i++) amounts[(start + i * 3) % 12] = amt
       return amounts
     }
+    case 'mesi_specifici': {
+      const months: number[] = Array.isArray(item.recurrence_months) ? item.recurrence_months : []
+      for (const m of months) { if (m >= 1 && m <= 12) amounts[m - 1] = amt }
+      return amounts
+    }
     default: return amounts
   }
 }
@@ -47,7 +52,8 @@ function getAnnualAmount(item: any): number {
 
 function getRecurrenceLabel(item: any): string {
   const labels: Record<Recurrence, string> = {
-    monthly: 'Mensile', weekly: 'Settimanale', annual: 'Annuale', once: 'Una tantum', quarterly: 'Trimestrale'
+    monthly: 'Mensile', weekly: 'Settimanale', annual: 'Annuale',
+    once: 'Una tantum', quarterly: 'Trimestrale', mesi_specifici: 'Mesi specifici',
   }
   const base = labels[item.recurrence as Recurrence] || item.recurrence
   if (item.recurrence === 'annual' && item.recurrence_month) return `${base} (${MONTHS_IT[item.recurrence_month - 1]})`
@@ -58,6 +64,11 @@ function getRecurrenceLabel(item: any): string {
       return `${base} (${d.toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })})`
     }
     if (item.recurrence_month) return `${base} (${MONTHS_IT[item.recurrence_month - 1]})`
+  }
+  if (item.recurrence === 'mesi_specifici') {
+    const months: number[] = Array.isArray(item.recurrence_months) ? item.recurrence_months : []
+    if (months.length > 0) return [...months].sort((a, b) => a - b).map(m => MONTHS_IT[m - 1]).join(', ')
+    return base
   }
   return base
 }
@@ -98,11 +109,13 @@ function ItemRow({ item, onEdit, onDelete }: { item: any; onEdit: () => void; on
 const defaultForm = (): {
   type: ItemType; description: string; budget_category_id: string | null
   recurrence: Recurrence; recurrence_month: number | null; recurrence_date: string
+  recurrence_months: number[]
   amount: string; is_variable: boolean; notes: string; active: boolean
   target_amount: string; target_date: string; planned_account_id: string | null
 } => ({
   type: 'expense', description: '', budget_category_id: null,
   recurrence: 'monthly', recurrence_month: null, recurrence_date: '',
+  recurrence_months: [],
   amount: '', is_variable: false, notes: '', active: true,
   target_amount: '', target_date: '', planned_account_id: null,
 })
@@ -488,7 +501,9 @@ export default function BudgetPage() {
     setItemForm({
       type: item.type, description: item.description, budget_category_id: item.budget_category_id || null,
       recurrence: item.recurrence, recurrence_month: item.recurrence_month || null,
-      recurrence_date: item.recurrence_date || '', amount: String(item.amount),
+      recurrence_date: item.recurrence_date || '',
+      recurrence_months: Array.isArray(item.recurrence_months) ? item.recurrence_months : [],
+      amount: String(item.amount),
       is_variable: !!item.is_variable, notes: item.notes || '', active: item.active !== false,
       target_amount: String(item.target_amount || ''), target_date: item.target_date || '',
       planned_account_id: item.planned_account_id || null,
@@ -507,6 +522,7 @@ export default function BudgetPage() {
       planned_account_id: itemForm.planned_account_id || null,
       recurrence: itemForm.recurrence, recurrence_month: itemForm.recurrence_month,
       recurrence_date: itemForm.recurrence_date || null,
+      recurrence_months: itemForm.recurrence === 'mesi_specifici' ? itemForm.recurrence_months : null,
       amount: parseFloat(itemForm.amount) || 0,
       is_variable: itemForm.is_variable, notes: itemForm.notes || null, active: itemForm.active,
     }
@@ -1445,15 +1461,51 @@ export default function BudgetPage() {
               )}
               <div>
                 <label className="text-xs font-medium text-gray-700 block mb-1">Ricorrenza *</label>
-                <select value={itemForm.recurrence} onChange={e => setItemForm(f => ({ ...f, recurrence: e.target.value as Recurrence, recurrence_month: null, recurrence_date: '' }))}
+                <select value={itemForm.recurrence} onChange={e => setItemForm(f => ({ ...f, recurrence: e.target.value as Recurrence, recurrence_month: null, recurrence_date: '', recurrence_months: [] }))}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
                   <option value="monthly">Mensile (× 12)</option>
                   <option value="weekly">Settimanale (× 52)</option>
                   <option value="quarterly">Trimestrale (× 4)</option>
                   <option value="annual">Annuale (1 volta)</option>
                   <option value="once">Una tantum</option>
+                  <option value="mesi_specifici">Mesi specifici</option>
                 </select>
               </div>
+              {itemForm.recurrence === 'mesi_specifici' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-2">
+                    Seleziona i mesi{' '}
+                    <span className="text-gray-400 font-normal">
+                      ({itemForm.recurrence_months.length} sel. · {itemForm.amount ? `${(parseFloat(itemForm.amount) * itemForm.recurrence_months.length).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })}/anno` : '—'})
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {MONTHS_IT.map((m, idx) => {
+                      const monthNum = idx + 1
+                      const selected = itemForm.recurrence_months.includes(monthNum)
+                      return (
+                        <button
+                          key={monthNum}
+                          type="button"
+                          onClick={() => setItemForm(f => ({
+                            ...f,
+                            recurrence_months: selected
+                              ? f.recurrence_months.filter(x => x !== monthNum)
+                              : [...f.recurrence_months, monthNum],
+                          }))}
+                          className={`py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            selected
+                              ? 'bg-primary text-white border-primary'
+                              : 'bg-white text-gray-600 border-gray-200 hover:border-primary/50 hover:text-primary'
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {(itemForm.recurrence === 'annual' || itemForm.recurrence === 'quarterly') && (
                 <div>
                   <label className="text-xs font-medium text-gray-700 block mb-1">

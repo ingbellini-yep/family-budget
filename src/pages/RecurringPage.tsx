@@ -3,29 +3,35 @@ import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { supabase } from '../lib/supabase'
 import { formatCurrency } from '../lib/utils'
+import { MONTHS_IT } from '../lib/budgetUtils'
 import { Plus, Trash2, X, Edit2, RefreshCw, AlertCircle } from 'lucide-react'
+
+type Frequency = 'mensile' | 'annuale' | 'settimanale' | 'mesi_specifici'
 
 const FREQ_LABELS: Record<string, string> = {
   mensile: 'Mensile',
   annuale: 'Annuale',
   settimanale: 'Settimanale',
+  mesi_specifici: 'Mesi specifici',
 }
 
 const FREQ_COLORS: Record<string, string> = {
   mensile: 'bg-blue-100 text-blue-700',
   annuale: 'bg-purple-100 text-purple-700',
   settimanale: 'bg-green-100 text-green-700',
+  mesi_specifici: 'bg-orange-100 text-orange-700',
 }
 
 const defaultForm = () => ({
   name: '',
   amount: '',
-  frequency: 'mensile' as 'mensile' | 'annuale' | 'settimanale',
+  frequency: 'mensile' as Frequency,
   due_day: '1',
   next_due_date: new Date().toISOString().split('T')[0],
   account_id: '',
   category_id: '',
   active: true,
+  recurrence_months: [] as number[],
 })
 
 function daysUntil(dateStr: string): number {
@@ -64,6 +70,7 @@ export default function RecurringPage() {
       account_id: r.account_id || '',
       category_id: r.category_id || '',
       active: r.active !== false,
+      recurrence_months: Array.isArray(r.recurrence_months) ? r.recurrence_months : [],
     })
     setShowModal(true)
   }
@@ -81,6 +88,7 @@ export default function RecurringPage() {
       account_id: form.account_id || null,
       category_id: form.category_id || null,
       active: form.active,
+      recurrence_months: form.frequency === 'mesi_specifici' ? form.recurrence_months : null,
     }
     if (editingId) {
       await supabase.from('recurring_expenses').update(payload as any).eq('id', editingId)
@@ -118,9 +126,14 @@ export default function RecurringPage() {
     .reduce((s: number, r: any) => s + Number(r.amount), 0)
 
   const annualTotal = active.reduce((s: number, r: any) => {
-    if (r.frequency === 'mensile') return s + Number(r.amount) * 12
-    if (r.frequency === 'settimanale') return s + Number(r.amount) * 52
-    return s + Number(r.amount)
+    const amt = Number(r.amount)
+    if (r.frequency === 'mensile') return s + amt * 12
+    if (r.frequency === 'settimanale') return s + amt * 52
+    if (r.frequency === 'mesi_specifici') {
+      const months: number[] = Array.isArray(r.recurrence_months) ? r.recurrence_months : []
+      return s + amt * months.length
+    }
+    return s + amt
   }, 0)
 
   return (
@@ -187,7 +200,9 @@ export default function RecurringPage() {
                   <div className="font-medium text-gray-900 text-sm truncate">{r.name}</div>
                   <div className="text-xs text-gray-400 flex gap-2 flex-wrap">
                     <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${FREQ_COLORS[r.frequency] || 'bg-gray-100 text-gray-600'}`}>
-                      {FREQ_LABELS[r.frequency] || r.frequency}
+                      {r.frequency === 'mesi_specifici' && Array.isArray(r.recurrence_months) && r.recurrence_months.length > 0
+                        ? [...r.recurrence_months].sort((a: number, b: number) => a - b).map((m: number) => MONTHS_IT[m - 1]).join(', ')
+                        : (FREQ_LABELS[r.frequency] || r.frequency)}
                     </span>
                     {r.category_id && <span>{getCategoryName(r.category_id)}</span>}
                     {r.account_id && <><span>·</span><span>{getAccountName(r.account_id)}</span></>}
@@ -284,15 +299,51 @@ export default function RecurringPage() {
                   <label className="text-xs font-medium text-gray-700">Frequenza</label>
                   <select
                     value={form.frequency}
-                    onChange={e => setForm(f => ({ ...f, frequency: e.target.value as any }))}
+                    onChange={e => setForm(f => ({ ...f, frequency: e.target.value as Frequency, recurrence_months: [] }))}
                     className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
                   >
                     <option value="mensile">Mensile</option>
                     <option value="annuale">Annuale</option>
                     <option value="settimanale">Settimanale</option>
+                    <option value="mesi_specifici">Mesi specifici</option>
                   </select>
                 </div>
               </div>
+              {form.frequency === 'mesi_specifici' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-2">
+                    Mesi di addebito{' '}
+                    <span className="text-gray-400 font-normal">
+                      ({form.recurrence_months.length} sel.{form.amount ? ` · ${(parseFloat(form.amount) * form.recurrence_months.length).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })}/anno` : ''})
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {MONTHS_IT.map((m, idx) => {
+                      const monthNum = idx + 1
+                      const selected = form.recurrence_months.includes(monthNum)
+                      return (
+                        <button
+                          key={monthNum}
+                          type="button"
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            recurrence_months: selected
+                              ? f.recurrence_months.filter(x => x !== monthNum)
+                              : [...f.recurrence_months, monthNum],
+                          }))}
+                          className={`py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            selected
+                              ? 'bg-primary text-white border-primary'
+                              : 'bg-white text-gray-600 border-gray-200 hover:border-primary/50 hover:text-primary'
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-700">Giorno scadenza</label>
