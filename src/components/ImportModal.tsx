@@ -41,12 +41,18 @@ function isDuplicate(row: Omit<PreviewRow, 'isDuplicate' | 'hasError' | 'include
 }
 
 // ─── PDF page render via pdfjs ────────────────────────────────────────────────
+let _pdfjsLib: any = null
+async function getPdfjsLib() {
+  if (_pdfjsLib) return _pdfjsLib
+  _pdfjsLib = await import('pdfjs-dist')
+  // Use CDN worker — avoids Vite new URL() resolution issues in production
+  _pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${_pdfjsLib.version}/pdf.worker.min.mjs`
+  return _pdfjsLib
+}
+
 async function renderPdfPageToDataUrl(pdfData: ArrayBuffer, pageNum: number): Promise<string> {
-  const pdfjsLib = await import('pdfjs-dist')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).href
+  const pdfjsLib = await getPdfjsLib()
   const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise
   const page = await pdf.getPage(pageNum)
   const viewport = page.getViewport({ scale: 2 })
@@ -58,11 +64,7 @@ async function renderPdfPageToDataUrl(pdfData: ArrayBuffer, pageNum: number): Pr
 }
 
 async function getPdfPageCount(pdfData: ArrayBuffer): Promise<number> {
-  const pdfjsLib = await import('pdfjs-dist')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).href
+  const pdfjsLib = await getPdfjsLib()
   const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise
   return pdf.numPages
 }
