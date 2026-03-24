@@ -2,10 +2,12 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate } from '../lib/utils'
-import { Plus, Trash2, X, Filter } from 'lucide-react'
+import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
+import ImportModal from '../components/ImportModal'
+import { suggestCategory, getStoredApiKey } from '../lib/claudeAI'
 
 const txSchema = z.object({
   date: z.string().min(1, 'Obbligatorio'),
@@ -29,6 +31,8 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [showFilters, setShowFilters] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [suggestingCategory, setSuggestingCategory] = useState(false)
 
   const form = useForm<TxForm>({
     resolver: zodResolver(txSchema),
@@ -83,7 +87,20 @@ export default function TransactionsPage() {
 
   const watchType = form.watch('type')
   const watchCategoryId = form.watch('category_id')
+  const watchDescription = form.watch('description')
   const filteredCategories = categories.filter(c => c.type === watchType || c.type === 'risparmio')
+
+  const handleSuggestCategory = async () => {
+    const desc = watchDescription?.trim()
+    if (!desc || !getStoredApiKey()) return
+    setSuggestingCategory(true)
+    const { categoryId, budgetCategoryId } = await suggestCategory(
+      desc, categories, budgetCategories, getStoredApiKey(),
+    ).catch(() => ({ categoryId: null, budgetCategoryId: null }))
+    if (categoryId) form.setValue('category_id', categoryId)
+    if (budgetCategoryId) form.setValue('budget_category_id', budgetCategoryId)
+    setSuggestingCategory(false)
+  }
 
   // Auto-suggest macro categoria when category changes
   useEffect(() => {
@@ -110,6 +127,13 @@ export default function TransactionsPage() {
           >
             <Filter className="h-4 w-4" />
             <span className="hidden sm:inline">Filtra</span>
+          </button>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 rounded-lg text-sm font-medium hover:bg-purple-100"
+          >
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">Importa</span>
           </button>
           <button
             onClick={() => setShowModal(true)}
@@ -271,10 +295,24 @@ export default function TransactionsPage() {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-700">Descrizione</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-gray-700">Descrizione</label>
+                  {getStoredApiKey() && (
+                    <button
+                      type="button"
+                      onClick={handleSuggestCategory}
+                      disabled={suggestingCategory || !watchDescription?.trim()}
+                      className="flex items-center gap-1 text-[10px] text-purple-600 hover:text-purple-800 disabled:opacity-40"
+                    >
+                      {suggestingCategory
+                        ? <><Loader2 className="h-3 w-3 animate-spin" /> Analisi...</>
+                        : <><Sparkles className="h-3 w-3" /> Suggerisci categoria AI</>}
+                    </button>
+                  )}
+                </div>
                 <input
                   {...form.register('description')}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                   placeholder="es. Supermercato Esselunga"
                 />
                 {form.formState.errors.description && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.description.message}</p>}
@@ -352,6 +390,21 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      <ImportModal
+        open={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImported={(count) => {
+          setShowImportModal(false)
+          // reload transactions is handled by addTransaction updating store
+        }}
+        profile={profile}
+        accounts={accounts}
+        categories={categories}
+        budgetCategories={budgetCategories}
+        transactions={transactions}
+        addTransaction={addTransaction}
+      />
     </div>
   )
 }

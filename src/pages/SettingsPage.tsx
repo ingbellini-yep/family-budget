@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useAppStore } from '../store/appStore'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, X, Copy, Check, Users, Mail, Shield, RefreshCw, UserMinus, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, X, Copy, Check, Users, Mail, Shield, RefreshCw, UserMinus, ChevronDown, ChevronUp, ExternalLink, Loader2, AlertTriangle, Sparkles } from 'lucide-react'
+import { testApiKey } from '../lib/claudeAI'
 
 const CATEGORY_COLORS = [
   '#ef4444', '#f97316', '#f59e0b', '#eab308', '#22c55e', '#16a34a',
@@ -43,6 +44,8 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
   const [apiKeySaved, setApiKeySaved] = useState(false)
+  const [testingKey, setTestingKey] = useState(false)
+  const [testKeyResult, setTestKeyResult] = useState<{ ok: boolean; error?: string } | null>(null)
 
   // ── Utenti ───────────────────────────────────────────────
   const [members, setMembers] = useState<any[]>([])
@@ -70,8 +73,15 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (profile?.family_id) {
-      supabase.from('families').select('name').eq('id', profile.family_id).single().then(({ data }) => {
-        if (data) setFamilyName(data.name)
+      supabase.from('families').select('name, claude_api_key').eq('id', profile.family_id).single().then(({ data }) => {
+        const d = data as any
+        if (d) {
+          setFamilyName(d.name)
+          if (d.claude_api_key) {
+            setClaudeApiKey(d.claude_api_key)
+            localStorage.setItem('claude_api_key', d.claude_api_key)
+          }
+        }
       })
     }
     if (tab === 'utenti') loadUsersData()
@@ -96,10 +106,23 @@ export default function SettingsPage() {
     setSavingFamily(false)
   }
 
-  const handleSaveApiKey = () => {
+  const handleSaveApiKey = async () => {
     localStorage.setItem('claude_api_key', claudeApiKey)
+    if (profile?.family_id) {
+      await supabase.from('families').update({ claude_api_key: claudeApiKey || null } as any).eq('id', profile.family_id)
+    }
     setApiKeySaved(true)
-    setTimeout(() => setApiKeySaved(false), 2000)
+    setTestKeyResult(null)
+    setTimeout(() => setApiKeySaved(false), 2500)
+  }
+
+  const handleTestKey = async () => {
+    if (!claudeApiKey) return
+    setTestingKey(true)
+    setTestKeyResult(null)
+    const result = await testApiKey(claudeApiKey)
+    setTestKeyResult(result)
+    setTestingKey(false)
   }
 
   const handleCopyFamilyId = async () => {
@@ -586,21 +609,75 @@ export default function SettingsPage() {
 
       {/* ═══ TAB AI ══════════════════════════════════════════ */}
       {tab === 'ai' && (
-        <div className="bg-white rounded-xl border shadow-sm p-5">
-          <h2 className="text-base font-semibold text-gray-900 mb-1">Claude AI</h2>
-          <p className="text-xs text-gray-500 mb-4">Usata per importare automaticamente transazioni da screenshot e PDF</p>
+        <div className="bg-white rounded-xl border shadow-sm p-5 space-y-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="h-4 w-4 text-purple-500" />
+              <h2 className="text-base font-semibold text-gray-900">Integrazione AI — Claude</h2>
+            </div>
+            <p className="text-xs text-gray-500">
+              La API Key viene usata per importare transazioni da screenshot e PDF, e per suggerire automaticamente le categorie.
+              Viene salvata in modo sicuro sul record della tua famiglia.
+            </p>
+          </div>
+
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-gray-700">API Key Anthropic</label>
-              <input type="password" value={claudeApiKey} onChange={e => setClaudeApiKey(e.target.value)}
-                className="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
-                placeholder="sk-ant-..." />
+              <label className="text-xs font-medium text-gray-700 block mb-1">Claude API Key</label>
+              <input
+                type="password"
+                value={claudeApiKey}
+                onChange={e => { setClaudeApiKey(e.target.value); setTestKeyResult(null) }}
+                className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="sk-ant-api03-..."
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Ottieni la tua chiave su <span className="text-blue-600">console.anthropic.com</span>
+              </p>
             </div>
-            <button onClick={handleSaveApiKey}
-              className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center gap-2">
-              {apiKeySaved ? <><Check className="h-4 w-4" /> Salvata!</> : 'Salva API Key'}
-            </button>
-            <p className="text-xs text-gray-400">La chiave viene salvata solo in localStorage, non sul server.</p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveApiKey}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center gap-2"
+              >
+                {apiKeySaved ? <><Check className="h-4 w-4" /> Salvata!</> : 'Salva'}
+              </button>
+              <button
+                onClick={handleTestKey}
+                disabled={!claudeApiKey || testingKey}
+                className="border px-4 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2"
+              >
+                {testingKey
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Test in corso...</>
+                  : 'Testa connessione'}
+              </button>
+            </div>
+
+            {testKeyResult !== null && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${testKeyResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                {testKeyResult.ok
+                  ? <><Check className="h-4 w-4" /> Connessione riuscita — API Key valida</>
+                  : <><AlertTriangle className="h-4 w-4" /> Errore: {testKeyResult.error || 'Chiave non valida'}</>}
+              </div>
+            )}
+
+            {!claudeApiKey && (
+              <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                API Key non configurata — l'importazione AI non è disponibile
+              </div>
+            )}
+          </div>
+
+          <div className="border-t pt-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Funzionalità disponibili con API Key</h3>
+            <ul className="space-y-1 text-xs text-gray-500">
+              <li className="flex items-center gap-2"><Check className="h-3 w-3 text-green-500" /> Import transazioni da screenshot app bancaria</li>
+              <li className="flex items-center gap-2"><Check className="h-3 w-3 text-green-500" /> Import transazioni da PDF estratto conto</li>
+              <li className="flex items-center gap-2"><Check className="h-3 w-3 text-green-500" /> Suggerimento automatico categorie</li>
+              <li className="flex items-center gap-2"><Check className="h-3 w-3 text-gray-300" /> Import da CSV/Excel (non richiede API Key)</li>
+            </ul>
           </div>
         </div>
       )}
