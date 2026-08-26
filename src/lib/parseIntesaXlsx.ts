@@ -19,10 +19,16 @@ function excelDateToYMD(serial: number): string {
   return `${y}-${m}-${day}`
 }
 
+// Col letter(s) → 0-based index: A=0, B=1, H=7, etc.
+function colToIdx(col: string): number {
+  let n = 0
+  for (let i = 0; i < col.length; i++) n = n * 26 + col.charCodeAt(i) - 64
+  return n - 1
+}
+
 // Operations where column B is a generic label and column C is the actual merchant
 const GENERIC_OPERATIONS = ['pagamento tramite pos']
 
-// Keyword map: Intesa category → keywords to match app category names
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Generi alimentari e supermercato': ['supermercato', 'spesa', 'alimentar', 'cibo'],
   'Ristoranti e bar': ['ristorante', 'bar', 'cena', 'pranzo', 'pizza'],
@@ -73,14 +79,37 @@ export function parseIntesaXlsx(buffer: ArrayBuffer): IntesaTransaction[] | null
   const ws = wb.Sheets[wb.SheetNames[0]]
   if (!ws) return null
 
-  // sheet_to_json with header:1 returns an array of arrays; raw:true keeps serial dates as numbers
-  const allRows: any[][] = (XLSX.utils as any).sheet_to_json(ws, { header: 1, raw: true })
+  // Build a row→col→value map by iterating directly over ALL cell keys.
+  // This bypasses ws['!ref'] entirely, so it works even when Intesa exports
+  // an incorrect <dimension ref="A1:J33"/> that is shorter than the actual data.
+  const rowMap = new Map<number, Map<number, string | number>>()
 
-  // Find the header row: first row where col A (index 0) is exactly "Data"
+  for (const addr of Object.keys(ws)) {
+    if (addr.startsWith('!')) continue
+    const match = addr.match(/^([A-Z]+)(\d+)$/)
+    if (!match) continue
+
+    const rowNum = parseInt(match[2])
+    const colIdx = colToIdx(match[1])
+    const cell = ws[addr]
+    // For number/date cells cell.v is the raw number; for text cells cell.v is the resolved string
+    const val: string | number = typeof cell.v === 'number' ? cell.v : String(cell.v ?? cell.w ?? '')
+
+    if (!rowMap.has(rowNum)) rowMap.set(rowNum, new Map())
+    rowMap.get(rowNum)!.set(colIdx, val)
+  }
+
+  if (rowMap.size === 0) return null
+
+  // Sort rows ascending by row number
+  const sortedRows = Array.from(rowMap.entries()).sort((a, b) => a[0] - b[0])
+
+  // Find the header row: first row where col A (idx 0) is exactly "Data"
   let headerIdx = -1
-  for (let i = 0; i < Math.min(allRows.length, 40); i++) {
-    const row = allRows[i]
-    if (Array.isArray(row) && String(row[0] ?? '').trim() === 'Data') {
+  for (let i = 0; i < Math.min(sortedRows.length, 40); i++) {
+    const colMap = sortedRows[i][1]
+    const valA = colMap.get(0)
+    if (typeof valA === 'string' && valA.trim() === 'Data') {
       headerIdx = i
       break
     }
@@ -90,18 +119,18 @@ export function parseIntesaXlsx(buffer: ArrayBuffer): IntesaTransaction[] | null
 
   const results: IntesaTransaction[] = []
 
-  for (let i = headerIdx + 1; i < allRows.length; i++) {
-    const row = allRows[i]
-    if (!Array.isArray(row) || row.length < 8) continue
+  for (let i = headerIdx + 1; i < sortedRows.length; i++) {
+    const colMap = sortedRows[i][1]
 
-    // A=0 Data, B=1 Operazione, C=2 Dettagli, D=3 Conto, E=4 Contabilizzazione, F=5 Categoria, G=6 Valuta, H=7 Importo
-    const dateSerial = row[0]
-    const importo = row[7]
+    const dateSerial = colMap.get(0)  // A: Data (Excel serial number)
+    const importo = colMap.get(7)     // H: Importo
 
     if (typeof dateSerial !== 'number' || typeof importo !== 'number') continue
 
-    const operazione = String(row[1] ?? '').trim()
-    const dettagli = String(row[2] ?? '').trim()
+    const operazione = String(colMap.get(1) ?? '').trim()  // B: Operazione
+    const dettagli = String(colMap.get(2) ?? '').trim()    // C: Dettagli
+    const conto = String(colMap.get(3) ?? '').trim()       // D: Conto o carta
+    const categoria = String(colMap.get(5) ?? '').trim()   // F: Categoria
 
     const isGenericOp = GENERIC_OPERATIONS.some(g => operazione.toLowerCase().startsWith(g))
     const description = isGenericOp && dettagli ? dettagli : operazione
@@ -110,8 +139,8 @@ export function parseIntesaXlsx(buffer: ArrayBuffer): IntesaTransaction[] | null
       date: excelDateToYMD(dateSerial),
       description,
       originalDescription: dettagli || operazione,
-      intesaCategory: String(row[5] ?? '').trim(),
-      conto: String(row[3] ?? '').trim(),
+      intesaCategory: categoria,
+      conto,
       amount: Math.abs(importo),
       type: importo >= 0 ? 'entrata' : 'uscita',
     })
