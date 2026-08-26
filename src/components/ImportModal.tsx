@@ -112,6 +112,7 @@ export default function ImportModal({
   const hasApiKey = !!apiKey
 
   const defaultAccountId = accounts[0]?.id || ''
+  const [globalAccountId, setGlobalAccountId] = useState<string>('')
 
   const reset = useCallback(() => {
     setRows([]); setStep('upload'); setLoading(false); setError(null); setSaved(false)
@@ -235,6 +236,7 @@ export default function ImportModal({
         setError('File non riconosciuto come estratto conto Intesa San Paolo. Assicurati di esportare nel formato .xlsx dal menu Movimenti → Esporta.')
         setLoading(false); return
       }
+      const accountId = globalAccountId || defaultAccountId
       const previewRows: PreviewRow[] = parsed.map((tx, i) => {
         const categoryId = matchIntesaCategory(tx.intesaCategory, categories, tx.type)
         const row = {
@@ -243,7 +245,7 @@ export default function ImportModal({
           amount: tx.amount,
           type: tx.type,
           category_id: categoryId,
-          account_id: defaultAccountId,
+          account_id: accountId,
         }
         return {
           _id: `intesa-${i}-${Date.now()}`,
@@ -354,6 +356,11 @@ export default function ImportModal({
         note: null,
       })
       if (!error) saved++
+    }
+    if (saved === 0 && toSave.length > 0) {
+      setStep('preview')
+      setError(`Salvataggio fallito: nessuna transazione importata su ${toSave.length} tentate. Verifica che il conto selezionato esista e che tutti i campi obbligatori siano compilati.`)
+      return
     }
     setSaved(true)
     onImported(saved)
@@ -501,6 +508,18 @@ export default function ImportModal({
                     Le colonne vengono mappate automaticamente e le categorie della banca vengono
                     usate come suggerimento.
                   </p>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Conto di provenienza
+                    </label>
+                    <select
+                      value={globalAccountId || defaultAccountId}
+                      onChange={e => setGlobalAccountId(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
                   <DropZone
                     accept=".xlsx,.xls"
                     label="Trascina il file Excel di Intesa San Paolo o clicca per selezionarlo"
@@ -586,7 +605,7 @@ export default function ImportModal({
           {!loading && !saved && (step === 'preview' && (mode !== 'csv' || csvStep === 3)) && rows.length > 0 && (
             <div className="space-y-3">
               {/* Stats */}
-              <div className="flex gap-3 text-xs flex-wrap">
+              <div className="flex gap-3 text-xs flex-wrap items-center">
                 <span className="px-2 py-1 bg-green-50 text-green-700 rounded-full font-medium">{includedCount} da importare</span>
                 {dupCount > 0 && <span className="px-2 py-1 bg-yellow-50 text-yellow-700 rounded-full">{dupCount} possibili duplicati</span>}
                 {errCount > 0 && <span className="px-2 py-1 bg-red-50 text-red-700 rounded-full">{errCount} errori</span>}
@@ -600,6 +619,20 @@ export default function ImportModal({
                     Suggerisci categorie AI
                   </button>
                 )}
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <span className="text-gray-500">Conto:</span>
+                  <select
+                    className="border rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    value={rows[0]?.account_id || defaultAccountId}
+                    onChange={e => {
+                      const v = e.target.value
+                      setGlobalAccountId(v)
+                      setRows(rs => rs.map(r => ({ ...r, account_id: v })))
+                    }}
+                  >
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
               </div>
 
               {error && (
