@@ -29,6 +29,7 @@ interface AppState {
   addTransaction: (tx: any) => Promise<{ error: any }>
   deleteTransaction: (id: string) => Promise<{ error: any }>
   updateTransaction: (id: string, updates: any) => Promise<{ error: any }>
+  bulkDeleteTransactions: (filter: { familyId: string; dateFrom?: string; dateTo?: string; accountId?: string; all?: boolean }) => Promise<{ error: any; count?: number }>
   // Budget REV02
   loadBudgetCategories: (familyId: string) => Promise<void>
   loadBudgetItems: (familyId: string, year: number) => Promise<void>
@@ -137,6 +138,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { data, error } = await supabase.from('transactions').update(updates).eq('id', id).select().single()
     if (!error && data) {
       set(state => ({ transactions: state.transactions.map(t => t.id === id ? data : t) }))
+    }
+    return { error }
+  },
+
+  bulkDeleteTransactions: async ({ familyId, dateFrom, dateTo, accountId, all }) => {
+    if (!accountId && !all && !(dateFrom && dateTo)) {
+      return { error: new Error('Nessun filtro specificato') }
+    }
+    let query = supabase.from('transactions').delete().eq('family_id', familyId)
+    if (accountId) query = query.eq('account_id', accountId)
+    else if (dateFrom && dateTo) query = query.gte('date', dateFrom).lte('date', dateTo)
+    const { error } = await query
+    if (!error) {
+      const { selectedYear, selectedMonth } = get()
+      await get().loadTransactions(familyId, selectedYear, selectedMonth)
     }
     return { error }
   },

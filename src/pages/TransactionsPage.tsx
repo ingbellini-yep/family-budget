@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate } from '../lib/utils'
-import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2 } from 'lucide-react'
+import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2, Pencil, Layers } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -22,9 +22,14 @@ const txSchema = z.object({
 type TxForm = z.infer<typeof txSchema>
 
 export default function TransactionsPage() {
-  const { transactions, categories, accounts, budgetCategories, categoryBudgetMappings, addTransaction, deleteTransaction, selectedMonth, selectedYear } = useAppStore()
+  const {
+    transactions, categories, accounts, budgetCategories, categoryBudgetMappings,
+    addTransaction, deleteTransaction, updateTransaction, bulkDeleteTransactions,
+    selectedMonth, selectedYear,
+  } = useAppStore()
   const { profile } = useAuthStore()
   const [showModal, setShowModal] = useState(false)
+  const [editingTx, setEditingTx] = useState<any>(null)
   const [filterType, setFilterType] = useState<'all' | 'entrata' | 'uscita'>('all')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
@@ -33,6 +38,16 @@ export default function TransactionsPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [suggestingCategory, setSuggestingCategory] = useState(false)
+
+  // Bulk delete state
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [bulkMode, setBulkMode] = useState<'date' | 'account' | 'all'>('date')
+  const [bulkDateFrom, setBulkDateFrom] = useState('')
+  const [bulkDateTo, setBulkDateTo] = useState('')
+  const [bulkAccountId, setBulkAccountId] = useState('')
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkError, setBulkError] = useState('')
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const form = useForm<TxForm>({
     resolver: zodResolver(txSchema),
@@ -52,26 +67,68 @@ export default function TransactionsPage() {
     })
   }, [transactions, filterType, filterCategory, filterAccount, search])
 
+  const handleOpenAdd = () => {
+    setEditingTx(null)
+    form.reset({
+      date: new Date().toISOString().split('T')[0],
+      type: 'uscita',
+      description: '',
+      amount: undefined as any,
+      category_id: '',
+      account_id: '',
+      budget_category_id: '',
+      note: '',
+    })
+    setShowModal(true)
+  }
+
+  const handleOpenEdit = (tx: any) => {
+    setEditingTx(tx)
+    form.reset({
+      date: tx.date,
+      type: tx.type,
+      description: tx.description,
+      amount: tx.amount,
+      category_id: tx.category_id || '',
+      account_id: tx.account_id || '',
+      budget_category_id: tx.budget_category_id || '',
+      note: tx.note || '',
+    })
+    setShowModal(true)
+  }
+
   const handleSubmit = async (data: TxForm) => {
     if (!profile?.family_id) return
-    const { error } = await addTransaction({
-      ...data,
-      budget_category_id: data.budget_category_id || null,
-      family_id: profile.family_id,
-      created_by: profile.id,
-      source: 'manuale',
-    })
-    if (!error) {
-      setShowModal(false)
-      form.reset({
-        date: new Date().toISOString().split('T')[0],
-        type: 'uscita',
-        description: '',
-        amount: undefined as any,
-        category_id: '',
-        account_id: '',
-        note: '',
+    if (editingTx) {
+      const { error } = await updateTransaction(editingTx.id, {
+        ...data,
+        budget_category_id: data.budget_category_id || null,
+        note: data.note || null,
       })
+      if (!error) {
+        setShowModal(false)
+        setEditingTx(null)
+      }
+    } else {
+      const { error } = await addTransaction({
+        ...data,
+        budget_category_id: data.budget_category_id || null,
+        family_id: profile.family_id,
+        created_by: profile.id,
+        source: 'manuale',
+      })
+      if (!error) {
+        setShowModal(false)
+        form.reset({
+          date: new Date().toISOString().split('T')[0],
+          type: 'uscita',
+          description: '',
+          amount: undefined as any,
+          category_id: '',
+          account_id: '',
+          note: '',
+        })
+      }
     }
   }
 
@@ -79,6 +136,29 @@ export default function TransactionsPage() {
     setDeletingId(id)
     await deleteTransaction(id)
     setDeletingId(null)
+  }
+
+  const handleBulkDelete = async () => {
+    if (!profile?.family_id) return
+    setBulkError('')
+    setBulkDeleting(true)
+    const { error } = await bulkDeleteTransactions({
+      familyId: profile.family_id,
+      dateFrom: bulkMode === 'date' ? bulkDateFrom : undefined,
+      dateTo: bulkMode === 'date' ? bulkDateTo : undefined,
+      accountId: bulkMode === 'account' ? bulkAccountId : undefined,
+      all: bulkMode === 'all',
+    })
+    setBulkDeleting(false)
+    if (error) {
+      setBulkError(error.message || 'Errore durante l\'eliminazione')
+    } else {
+      setShowBulkModal(false)
+      setBulkConfirm(false)
+      setBulkDateFrom('')
+      setBulkDateTo('')
+      setBulkAccountId('')
+    }
   }
 
   const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || '-'
@@ -102,13 +182,16 @@ export default function TransactionsPage() {
     setSuggestingCategory(false)
   }
 
-  // Auto-suggest macro categoria when category changes
   useEffect(() => {
     if (watchCategoryId) {
       const mapping = categoryBudgetMappings.find((m: any) => m.transaction_category_id === watchCategoryId)
       form.setValue('budget_category_id', mapping?.budget_category_id || '')
     }
   }, [watchCategoryId, categoryBudgetMappings])
+
+  const bulkDeleteValid = bulkMode === 'all'
+    || (bulkMode === 'date' && bulkDateFrom && bulkDateTo && bulkDateFrom <= bulkDateTo)
+    || (bulkMode === 'account' && bulkAccountId)
 
   return (
     <div className="p-4 md:p-6 pb-20 md:pb-6">
@@ -129,6 +212,13 @@ export default function TransactionsPage() {
             <span className="hidden sm:inline">Filtra</span>
           </button>
           <button
+            onClick={() => { setShowBulkModal(true); setBulkConfirm(false); setBulkError('') }}
+            className="flex items-center gap-2 px-3 py-2 border border-red-200 text-red-600 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100"
+          >
+            <Layers className="h-4 w-4" />
+            <span className="hidden sm:inline">Elimina</span>
+          </button>
+          <button
             onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 rounded-lg text-sm font-medium hover:bg-purple-100"
           >
@@ -136,7 +226,7 @@ export default function TransactionsPage() {
             <span className="hidden sm:inline">Importa</span>
           </button>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={handleOpenAdd}
             className="flex items-center gap-2 px-3 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
@@ -200,7 +290,7 @@ export default function TransactionsPage() {
           <div className="bg-white rounded-xl border p-12 text-center">
             <p className="text-4xl mb-3">📭</p>
             <p className="text-gray-500">Nessuna transazione trovata</p>
-            <button onClick={() => setShowModal(true)} className="mt-3 text-primary text-sm hover:underline">
+            <button onClick={handleOpenAdd} className="mt-3 text-primary text-sm hover:underline">
               Aggiungi la prima transazione
             </button>
           </div>
@@ -230,11 +320,19 @@ export default function TransactionsPage() {
                   <div className="text-xs text-gray-400">{formatDate(tx.date)}</div>
                 </div>
                 <button
+                  onClick={() => handleOpenEdit(tx)}
+                  className="text-gray-300 hover:text-blue-500 transition-colors"
+                  title="Modifica"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
                   onClick={() => handleDelete(tx.id)}
                   disabled={deletingId === tx.id}
                   className="text-gray-300 hover:text-red-500 transition-colors"
+                  title="Elimina"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {deletingId === tx.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -242,13 +340,15 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      {/* Add transaction modal */}
+      {/* Add / Edit transaction modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-lg font-semibold">Nuova transazione</h2>
-              <button onClick={() => setShowModal(false)}>
+              <h2 className="text-lg font-semibold">
+                {editingTx ? 'Modifica transazione' : 'Nuova transazione'}
+              </h2>
+              <button onClick={() => { setShowModal(false); setEditingTx(null) }}>
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
@@ -373,7 +473,7 @@ export default function TransactionsPage() {
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => { setShowModal(false); setEditingTx(null) }}
                   className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Annulla
@@ -383,10 +483,119 @@ export default function TransactionsPage() {
                   disabled={form.formState.isSubmitting}
                   className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {form.formState.isSubmitting ? 'Salvataggio...' : 'Salva'}
+                  {form.formState.isSubmitting ? 'Salvataggio...' : (editingTx ? 'Aggiorna' : 'Salva')}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk delete modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-red-600">Eliminazione massiva</h2>
+              <button onClick={() => { setShowBulkModal(false); setBulkConfirm(false) }}>
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Mode tabs */}
+              <div className="flex rounded-lg bg-gray-100 p-1 gap-1 text-xs font-medium">
+                {(['date', 'account', 'all'] as const).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setBulkMode(m); setBulkConfirm(false); setBulkError('') }}
+                    className={`flex-1 py-2 rounded-md transition-colors ${bulkMode === m ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    {m === 'date' ? 'Per data' : m === 'account' ? 'Per conto' : 'Tutte'}
+                  </button>
+                ))}
+              </div>
+
+              {bulkMode === 'date' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-700">Da</label>
+                    <input
+                      type="date"
+                      value={bulkDateFrom}
+                      onChange={e => { setBulkDateFrom(e.target.value); setBulkConfirm(false) }}
+                      className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-700">A</label>
+                    <input
+                      type="date"
+                      value={bulkDateTo}
+                      onChange={e => { setBulkDateTo(e.target.value); setBulkConfirm(false) }}
+                      className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {bulkMode === 'account' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700">Conto</label>
+                  <select
+                    value={bulkAccountId}
+                    onChange={e => { setBulkAccountId(e.target.value); setBulkConfirm(false) }}
+                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                  >
+                    <option value="">Seleziona conto...</option>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {bulkMode === 'all' && (
+                <p className="text-sm text-gray-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                  Verranno eliminate <strong>tutte</strong> le transazioni della famiglia, indipendentemente dal mese visualizzato.
+                </p>
+              )}
+
+              {bulkError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{bulkError}</p>
+              )}
+
+              {/* Confirm step */}
+              {!bulkConfirm ? (
+                <button
+                  type="button"
+                  disabled={!bulkDeleteValid}
+                  onClick={() => setBulkConfirm(true)}
+                  className="w-full py-2.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Procedi con l'eliminazione
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-red-700 text-center">Sei sicuro? L'azione è irreversibile.</p>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setBulkConfirm(false)}
+                      className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="button"
+                      disabled={bulkDeleting}
+                      onClick={handleBulkDelete}
+                      className="flex-1 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {bulkDeleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Eliminazione...</> : 'Conferma eliminazione'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -396,7 +605,6 @@ export default function TransactionsPage() {
         onClose={() => setShowImportModal(false)}
         onImported={(count) => {
           setShowImportModal(false)
-          // reload transactions is handled by addTransaction updating store
         }}
         profile={profile}
         accounts={accounts}
