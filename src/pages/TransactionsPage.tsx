@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate } from '../lib/utils'
-import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2, Pencil, Layers } from 'lucide-react'
+import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2, Pencil, Layers, RefreshCw } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -24,7 +24,7 @@ type TxForm = z.infer<typeof txSchema>
 export default function TransactionsPage() {
   const {
     transactions, categories, accounts, budgetCategories, categoryBudgetMappings,
-    addTransaction, deleteTransaction, updateTransaction, bulkDeleteTransactions,
+    addTransaction, deleteTransaction, updateTransaction, bulkDeleteTransactions, bulkUpdateTransactions,
     selectedMonth, selectedYear,
   } = useAppStore()
   const { profile } = useAuthStore()
@@ -32,7 +32,10 @@ export default function TransactionsPage() {
   const [editingTx, setEditingTx] = useState<any>(null)
   const [filterType, setFilterType] = useState<'all' | 'entrata' | 'uscita'>('all')
   const [filterCategory, setFilterCategory] = useState('')
+  const [filterBudgetCategory, setFilterBudgetCategory] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
   const [search, setSearch] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [showFilters, setShowFilters] = useState(false)
@@ -49,6 +52,14 @@ export default function TransactionsPage() {
   const [bulkError, setBulkError] = useState('')
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
+  // Bulk update state
+  const [showBulkUpdateModal, setShowBulkUpdateModal] = useState(false)
+  const [bulkUpdateType, setBulkUpdateType] = useState<'' | 'entrata' | 'uscita'>('')
+  const [bulkUpdateCategoryId, setBulkUpdateCategoryId] = useState('')
+  const [bulkUpdateBudgetCategoryId, setBulkUpdateBudgetCategoryId] = useState('')
+  const [bulkUpdating, setBulkUpdating] = useState(false)
+  const [bulkUpdateError, setBulkUpdateError] = useState('')
+
   const form = useForm<TxForm>({
     resolver: zodResolver(txSchema),
     defaultValues: {
@@ -57,15 +68,31 @@ export default function TransactionsPage() {
     }
   })
 
+  const hasActiveFilters = filterType !== 'all' || filterCategory || filterBudgetCategory
+    || filterAccount || filterDateFrom || filterDateTo || search
+
   const filtered = useMemo(() => {
     return transactions.filter(t => {
       if (filterType !== 'all' && t.type !== filterType) return false
       if (filterCategory && t.category_id !== filterCategory) return false
+      if (filterBudgetCategory && t.budget_category_id !== filterBudgetCategory) return false
       if (filterAccount && t.account_id !== filterAccount) return false
+      if (filterDateFrom && t.date < filterDateFrom) return false
+      if (filterDateTo && t.date > filterDateTo) return false
       if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
       return true
     })
-  }, [transactions, filterType, filterCategory, filterAccount, search])
+  }, [transactions, filterType, filterCategory, filterBudgetCategory, filterAccount, filterDateFrom, filterDateTo, search])
+
+  const resetFilters = () => {
+    setFilterType('all')
+    setFilterCategory('')
+    setFilterBudgetCategory('')
+    setFilterAccount('')
+    setFilterDateFrom('')
+    setFilterDateTo('')
+    setSearch('')
+  }
 
   const handleOpenAdd = () => {
     setEditingTx(null)
@@ -161,6 +188,28 @@ export default function TransactionsPage() {
     }
   }
 
+  const handleBulkUpdate = async () => {
+    const ids = filtered.map(t => t.id)
+    if (!ids.length) return
+    const updates: Record<string, any> = {}
+    if (bulkUpdateType) updates.type = bulkUpdateType
+    if (bulkUpdateCategoryId) updates.category_id = bulkUpdateCategoryId
+    if (bulkUpdateBudgetCategoryId) updates.budget_category_id = bulkUpdateBudgetCategoryId
+    if (!Object.keys(updates).length) return
+    setBulkUpdateError('')
+    setBulkUpdating(true)
+    const { error } = await bulkUpdateTransactions(ids, updates)
+    setBulkUpdating(false)
+    if (error) {
+      setBulkUpdateError(error.message || 'Errore durante l\'aggiornamento')
+    } else {
+      setShowBulkUpdateModal(false)
+      setBulkUpdateType('')
+      setBulkUpdateCategoryId('')
+      setBulkUpdateBudgetCategoryId('')
+    }
+  }
+
   const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || '-'
   const getCategoryColor = (id: string) => categories.find(c => c.id === id)?.color || '#94a3b8'
   const getAccountName = (id: string) => accounts.find(a => a.id === id)?.name || '-'
@@ -169,6 +218,9 @@ export default function TransactionsPage() {
   const watchCategoryId = form.watch('category_id')
   const watchDescription = form.watch('description')
   const filteredCategories = categories.filter(c => c.type === watchType || c.type === 'risparmio')
+  const bulkUpdateFilteredCategories = categories.filter(c =>
+    !bulkUpdateType || c.type === bulkUpdateType || c.type === 'risparmio'
+  )
 
   const handleSuggestCategory = async () => {
     const desc = watchDescription?.trim()
@@ -193,6 +245,8 @@ export default function TransactionsPage() {
     || (bulkMode === 'date' && bulkDateFrom && bulkDateTo && bulkDateFrom <= bulkDateTo)
     || (bulkMode === 'account' && bulkAccountId)
 
+  const bulkUpdateValid = bulkUpdateType || bulkUpdateCategoryId || bulkUpdateBudgetCategoryId
+
   return (
     <div className="p-4 md:p-6 pb-20 md:pb-6">
       {/* Header */}
@@ -206,10 +260,11 @@ export default function TransactionsPage() {
         <div className="flex gap-2">
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium transition-colors ${hasActiveFilters ? 'bg-primary/10 border-primary/30 text-primary' : 'text-gray-600 hover:bg-gray-50'}`}
           >
             <Filter className="h-4 w-4" />
             <span className="hidden sm:inline">Filtra</span>
+            {hasActiveFilters && <span className="h-2 w-2 rounded-full bg-primary" />}
           </button>
           <button
             onClick={() => { setShowBulkModal(true); setBulkConfirm(false); setBulkError('') }}
@@ -237,44 +292,86 @@ export default function TransactionsPage() {
 
       {/* Filters */}
       {showFilters && (
-        <div className="bg-white border rounded-xl p-4 mb-4 shadow-sm grid grid-cols-2 md:grid-cols-4 gap-3">
-          <input
-            type="text"
-            placeholder="Cerca..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="col-span-2 md:col-span-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          <select
-            value={filterType}
-            onChange={e => setFilterType(e.target.value as any)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
-          >
-            <option value="all">Tutti i tipi</option>
-            <option value="entrata">Entrate</option>
-            <option value="uscita">Uscite</option>
-          </select>
-          <select
-            value={filterCategory}
-            onChange={e => setFilterCategory(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
-          >
-            <option value="">Tutte le categorie</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select
-            value={filterAccount}
-            onChange={e => setFilterAccount(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
-          >
-            <option value="">Tutti i conti</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+        <div className="bg-white border rounded-xl p-4 mb-4 shadow-sm space-y-3">
+          {/* Row 1: search + type + account */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <input
+              type="text"
+              placeholder="Cerca descrizione..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="col-span-2 md:col-span-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <select
+              value={filterType}
+              onChange={e => setFilterType(e.target.value as any)}
+              className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="all">Tutti i tipi</option>
+              <option value="entrata">Entrate</option>
+              <option value="uscita">Uscite</option>
+            </select>
+            <select
+              value={filterAccount}
+              onChange={e => setFilterAccount(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="">Tutti i conti</option>
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          {/* Row 2: categories + date range */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <select
+              value={filterCategory}
+              onChange={e => setFilterCategory(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="">Tutte le categorie</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select
+              value={filterBudgetCategory}
+              onChange={e => setFilterBudgetCategory(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="">Tutte le macro-cat.</option>
+              {budgetCategories.map((bc: any) => (
+                <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+              ))}
+            </select>
+            <div className="relative">
+              <label className="absolute -top-1.5 left-2 text-[10px] text-gray-400 bg-white px-0.5">Da</label>
+              <input
+                type="date"
+                value={filterDateFrom}
+                onChange={e => setFilterDateFrom(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+            <div className="relative">
+              <label className="absolute -top-1.5 left-2 text-[10px] text-gray-400 bg-white px-0.5">A</label>
+              <input
+                type="date"
+                value={filterDateTo}
+                onChange={e => setFilterDateTo(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+          </div>
+          {hasActiveFilters && (
+            <button
+              onClick={resetFilters}
+              className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+            >
+              <X className="h-3 w-3" /> Rimuovi filtri
+            </button>
+          )}
         </div>
       )}
 
       {/* Summary bar */}
-      <div className="flex gap-4 mb-4 text-sm">
+      <div className="flex flex-wrap items-center gap-3 mb-4 text-sm">
         <span className="text-green-600 font-medium">
           Entrate: {formatCurrency(filtered.filter(t => t.type === 'entrata').reduce((s, t) => s + t.amount, 0))}
         </span>
@@ -282,6 +379,15 @@ export default function TransactionsPage() {
           Uscite: {formatCurrency(filtered.filter(t => t.type === 'uscita').reduce((s, t) => s + t.amount, 0))}
         </span>
         <span className="text-gray-500">({filtered.length} transazioni)</span>
+        {hasActiveFilters && filtered.length > 0 && (
+          <button
+            onClick={() => { setShowBulkUpdateModal(true); setBulkUpdateType(''); setBulkUpdateCategoryId(''); setBulkUpdateBudgetCategoryId(''); setBulkUpdateError('') }}
+            className="ml-auto flex items-center gap-1.5 px-2.5 py-1 border border-blue-200 text-blue-600 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Modifica le {filtered.length} filtrate
+          </button>
+        )}
       </div>
 
       {/* Transactions list */}
@@ -353,7 +459,6 @@ export default function TransactionsPage() {
               </button>
             </div>
             <form onSubmit={form.handleSubmit(handleSubmit)} className="p-4 space-y-4">
-              {/* Type toggle */}
               <div className="flex rounded-lg bg-gray-100 p-1">
                 <button
                   type="button"
@@ -376,9 +481,7 @@ export default function TransactionsPage() {
                   <label className="text-xs font-medium text-gray-700">Importo (€)</label>
                   <input
                     {...form.register('amount')}
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="number" step="0.01" min="0"
                     className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                     placeholder="0,00"
                   />
@@ -491,6 +594,102 @@ export default function TransactionsPage() {
         </div>
       )}
 
+      {/* Bulk update modal */}
+      {showBulkUpdateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold">Modifica in blocco</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{filtered.length} transazioni selezionate dai filtri attivi</p>
+              </div>
+              <button onClick={() => setShowBulkUpdateModal(false)}>
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-xs text-gray-500">Lascia vuoti i campi che non vuoi modificare.</p>
+
+              <div>
+                <label className="text-xs font-medium text-gray-700">Tipo (opzionale)</label>
+                <div className="flex rounded-lg bg-gray-100 p-1 mt-1">
+                  {(['', 'uscita', 'entrata'] as const).map(v => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => { setBulkUpdateType(v); setBulkUpdateCategoryId('') }}
+                      className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        bulkUpdateType === v
+                          ? v === 'uscita' ? 'bg-red-500 text-white'
+                            : v === 'entrata' ? 'bg-green-500 text-white'
+                            : 'bg-white shadow text-gray-700'
+                          : 'text-gray-500'
+                      }`}
+                    >
+                      {v === '' ? 'Non cambiare' : v === 'uscita' ? 'Uscita' : 'Entrata'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-700">Categoria (opzionale)</label>
+                <select
+                  value={bulkUpdateCategoryId}
+                  onChange={e => setBulkUpdateCategoryId(e.target.value)}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">— Non cambiare —</option>
+                  {bulkUpdateFilteredCategories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {budgetCategories.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700">Macro categoria (opzionale)</label>
+                  <select
+                    value={bulkUpdateBudgetCategoryId}
+                    onChange={e => setBulkUpdateBudgetCategoryId(e.target.value)}
+                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  >
+                    <option value="">— Non cambiare —</option>
+                    {budgetCategories.map((bc: any) => (
+                      <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {bulkUpdateError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{bulkUpdateError}</p>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkUpdateModal(false)}
+                  className="flex-1 py-2.5 border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkUpdating || !bulkUpdateValid}
+                  onClick={handleBulkUpdate}
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {bulkUpdating
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Aggiornamento...</>
+                    : `Applica a ${filtered.length} transazioni`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk delete modal */}
       {showBulkModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -502,7 +701,6 @@ export default function TransactionsPage() {
               </button>
             </div>
             <div className="p-4 space-y-4">
-              {/* Mode tabs */}
               <div className="flex rounded-lg bg-gray-100 p-1 gap-1 text-xs font-medium">
                 {(['date', 'account', 'all'] as const).map(m => (
                   <button
@@ -563,7 +761,6 @@ export default function TransactionsPage() {
                 <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{bulkError}</p>
               )}
 
-              {/* Confirm step */}
               {!bulkConfirm ? (
                 <button
                   type="button"
@@ -603,9 +800,7 @@ export default function TransactionsPage() {
       <ImportModal
         open={showImportModal}
         onClose={() => setShowImportModal(false)}
-        onImported={(count) => {
-          setShowImportModal(false)
-        }}
+        onImported={() => { setShowImportModal(false) }}
         profile={profile}
         accounts={accounts}
         categories={categories}

@@ -30,6 +30,7 @@ interface AppState {
   deleteTransaction: (id: string) => Promise<{ error: any }>
   updateTransaction: (id: string, updates: any) => Promise<{ error: any }>
   bulkDeleteTransactions: (filter: { familyId: string; dateFrom?: string; dateTo?: string; accountId?: string; all?: boolean }) => Promise<{ error: any; count?: number }>
+  bulkUpdateTransactions: (ids: string[], updates: Record<string, any>) => Promise<{ error: any }>
   // Budget REV02
   loadBudgetCategories: (familyId: string) => Promise<void>
   loadBudgetItems: (familyId: string, year: number) => Promise<void>
@@ -138,6 +139,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { data, error } = await supabase.from('transactions').update(updates).eq('id', id).select().single()
     if (!error && data) {
       set(state => ({ transactions: state.transactions.map(t => t.id === id ? data : t) }))
+    }
+    return { error }
+  },
+
+  bulkUpdateTransactions: async (ids, updates) => {
+    const { error } = await supabase.from('transactions').update(updates).in('id', ids)
+    if (!error) {
+      set(state => ({
+        transactions: state.transactions.map(t => ids.includes(t.id) ? { ...t, ...updates } : t),
+      }))
     }
     return { error }
   },
