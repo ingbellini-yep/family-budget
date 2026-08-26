@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
-import { X, Upload, FileText, Image, Table2, Trash2, Check, AlertTriangle, Loader2, Sparkles, ChevronRight, ChevronLeft, Settings } from 'lucide-react'
+import { X, FileText, Image, Table2, Trash2, Check, AlertTriangle, Loader2, Sparkles, ChevronRight, ChevronLeft, Building2 } from 'lucide-react'
 import { extractTransactionsFromImage, extractTransactionsFromPageImage, detectBank, suggestCategory, getStoredApiKey, ExtractedTransaction } from '../lib/claudeAI'
+import { parseIntesaXlsx, matchIntesaCategory } from '../lib/parseIntesaXlsx'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PreviewRow {
@@ -14,6 +15,7 @@ interface PreviewRow {
   isDuplicate: boolean
   hasError: boolean
   include: boolean
+  intesaCategory?: string
 }
 
 interface Props {
@@ -28,7 +30,7 @@ interface Props {
   addTransaction: (tx: any) => Promise<{ error: any }>
 }
 
-type Mode = 'screenshot' | 'pdf' | 'csv'
+type Mode = 'screenshot' | 'pdf' | 'csv' | 'intesa'
 type CsvStep = 1 | 2 | 3
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
@@ -222,6 +224,44 @@ export default function ImportModal({
     setLoading(false)
   }
 
+  // ── Intesa San Paolo XLSX handler ─────────────────────────────────────────
+  const handleIntesaFile = async (file: File) => {
+    setLoading(true); setError(null)
+    setLoadingMsg('Analisi file Intesa San Paolo...')
+    try {
+      const ab = await file.arrayBuffer()
+      const parsed = parseIntesaXlsx(ab)
+      if (!parsed) {
+        setError('File non riconosciuto come estratto conto Intesa San Paolo. Assicurati di esportare nel formato .xlsx dal menu Movimenti → Esporta.')
+        setLoading(false); return
+      }
+      const previewRows: PreviewRow[] = parsed.map((tx, i) => {
+        const categoryId = matchIntesaCategory(tx.intesaCategory, categories, tx.type)
+        const row = {
+          date: tx.date,
+          description: tx.description,
+          amount: tx.amount,
+          type: tx.type,
+          category_id: categoryId,
+          account_id: defaultAccountId,
+        }
+        return {
+          _id: `intesa-${i}-${Date.now()}`,
+          ...row,
+          intesaCategory: tx.intesaCategory,
+          isDuplicate: isDuplicate(row, transactions),
+          hasError: !tx.date || !tx.amount,
+          include: !isDuplicate(row, transactions) && !!tx.date && !!tx.amount,
+        }
+      })
+      setRows(previewRows)
+      setStep('preview')
+    } catch (e: any) {
+      setError(e.message || 'Errore nel parsing del file')
+    }
+    setLoading(false)
+  }
+
   // Build preview rows from CSV mapping
   const applyCsvMapping = useCallback(() => {
     const { date, description, amount, type, amountSign } = csvMapping
@@ -298,7 +338,7 @@ export default function ImportModal({
     if (!toSave.length) return
     setStep('saving')
     let saved = 0
-    const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : 'csv'
+    const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : 'csv' as const
     for (const r of toSave) {
       const { error } = await addTransaction({
         date: r.date,
@@ -356,6 +396,7 @@ export default function ImportModal({
               { id: 'screenshot', icon: Image, label: 'Screenshot' },
               { id: 'pdf', icon: FileText, label: 'PDF' },
               { id: 'csv', icon: Table2, label: 'CSV / Excel' },
+              { id: 'intesa', icon: Building2, label: 'Intesa San Paolo' },
             ] as const).map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
@@ -446,6 +487,25 @@ export default function ImportModal({
                     label="Trascina il file CSV/Excel o clicca per selezionarlo"
                     icon={<Table2 className="h-8 w-8 text-gray-300" />}
                     onFile={handleCsvFile}
+                    disabled={false}
+                  />
+                </div>
+              )}
+
+              {/* Intesa San Paolo upload */}
+              {mode === 'intesa' && (
+                <div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Carica l'esportazione Excel da Intesa Sanpaolo:{' '}
+                    <strong>App o Home Banking → Movimenti → Esporta → Excel (.xlsx)</strong>.
+                    Le colonne vengono mappate automaticamente e le categorie della banca vengono
+                    usate come suggerimento.
+                  </p>
+                  <DropZone
+                    accept=".xlsx,.xls"
+                    label="Trascina il file Excel di Intesa San Paolo o clicca per selezionarlo"
+                    icon={<Building2 className="h-8 w-8 text-gray-300" />}
+                    onFile={handleIntesaFile}
                     disabled={false}
                   />
                 </div>
@@ -626,6 +686,11 @@ export default function ImportModal({
                               <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                           </select>
+                          {row.intesaCategory && !row.category_id && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 max-w-[120px] truncate" title={row.intesaCategory}>
+                              ISP: {row.intesaCategory}
+                            </p>
+                          )}
                         </td>
                         <td className="px-2 py-1.5">
                           <select
