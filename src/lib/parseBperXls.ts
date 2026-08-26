@@ -61,7 +61,7 @@ export function parseBperXls(buffer: ArrayBuffer): BperTransaction[] | null {
   const ws = wb.Sheets[wb.SheetNames[0]]
   if (!ws) return null
 
-  const data = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '', raw: false })
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false }) as any[][]
 
   // Find header row: col index 1 === "Data operazione"
   let headerIdx = -1
