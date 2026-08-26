@@ -340,15 +340,21 @@ export default function ImportModal({
     if (!toSave.length) return
     setStep('saving')
     let saved = 0
-    const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : 'csv' as const
+    let firstError: string | null = null
+    const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : mode === 'intesa' ? 'csv' : 'csv'
     for (const r of toSave) {
+      const categoryId = r.category_id
+        || categories.find(c => c.type === r.type)?.id
+        || categories.find(c => c.type === 'uscita')?.id
+        || categories[0]?.id
+        || null
       const { error } = await addTransaction({
         date: r.date,
         description: r.description,
         amount: r.amount,
         type: r.type,
-        category_id: r.category_id || categories.find(c => c.type === (r.type === 'entrata' ? 'entrata' : 'uscita'))?.id || categories[0]?.id,
-        account_id: r.account_id,
+        category_id: categoryId,
+        account_id: r.account_id || defaultAccountId,
         budget_category_id: null,
         family_id: profile.family_id,
         created_by: profile.id,
@@ -356,10 +362,11 @@ export default function ImportModal({
         note: null,
       })
       if (!error) saved++
+      else if (!firstError) firstError = error?.message || JSON.stringify(error)
     }
     if (saved === 0 && toSave.length > 0) {
       setStep('preview')
-      setError(`Salvataggio fallito: nessuna transazione importata su ${toSave.length} tentate. Verifica che il conto selezionato esista e che tutti i campi obbligatori siano compilati.`)
+      setError(`Salvataggio fallito (0/${toSave.length}). Errore: ${firstError || 'sconosciuto'}`)
       return
     }
     setSaved(true)
