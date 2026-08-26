@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { X, FileText, Image, Table2, Trash2, Check, AlertTriangle, Loader2, Sparkles, ChevronRight, ChevronLeft, Building2 } from 'lucide-react'
 import { extractTransactionsFromImage, extractTransactionsFromPageImage, detectBank, suggestCategory, getStoredApiKey, ExtractedTransaction } from '../lib/claudeAI'
 import { parseIntesaXlsx, matchIntesaCategory } from '../lib/parseIntesaXlsx'
+import { parseBperXls, matchBperBudgetCategory } from '../lib/parseBperXls'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PreviewRow {
@@ -11,11 +12,13 @@ interface PreviewRow {
   amount: number
   type: 'entrata' | 'uscita'
   category_id: string
+  budget_category_id?: string
   account_id: string
   isDuplicate: boolean
   hasError: boolean
   include: boolean
   intesaCategory?: string
+  bperCategory?: string
 }
 
 interface Props {
@@ -30,7 +33,7 @@ interface Props {
   addTransaction: (tx: any) => Promise<{ error: any }>
 }
 
-type Mode = 'screenshot' | 'pdf' | 'csv' | 'intesa'
+type Mode = 'screenshot' | 'pdf' | 'csv' | 'intesa' | 'bper'
 type CsvStep = 1 | 2 | 3
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
@@ -264,6 +267,46 @@ export default function ImportModal({
     setLoading(false)
   }
 
+  // ── BPER XLS handler ─────────────────────────────────────────────────────────
+  const handleBperFile = async (file: File) => {
+    setLoading(true); setError(null)
+    setLoadingMsg('Analisi file BPER EPY...')
+    try {
+      const ab = await file.arrayBuffer()
+      const parsed = parseBperXls(ab)
+      if (!parsed) {
+        setError('File non riconosciuto come estratto conto BPER EPY. Assicurati di scaricare "Lista Movimenti" in formato .xls/.xlsx.')
+        setLoading(false); return
+      }
+      const accountId = globalAccountId || defaultAccountId
+      const previewRows: PreviewRow[] = parsed.map((tx, i) => {
+        const budgetCategoryId = matchBperBudgetCategory(tx.bperCategory, budgetCategories)
+        const row = {
+          date: tx.date,
+          description: tx.description,
+          amount: tx.amount,
+          type: tx.type,
+          category_id: '',
+          budget_category_id: budgetCategoryId || undefined,
+          account_id: accountId,
+        }
+        return {
+          _id: `bper-${i}-${Date.now()}`,
+          ...row,
+          bperCategory: tx.bperCategory,
+          isDuplicate: isDuplicate(row, transactions),
+          hasError: !tx.date || !tx.amount,
+          include: !isDuplicate(row, transactions) && !!tx.date && !!tx.amount,
+        }
+      })
+      setRows(previewRows)
+      setStep('preview')
+    } catch (e: any) {
+      setError(e.message || 'Errore nel parsing del file')
+    }
+    setLoading(false)
+  }
+
   // Build preview rows from CSV mapping
   const applyCsvMapping = useCallback(() => {
     const { date, description, amount, type, amountSign } = csvMapping
@@ -341,7 +384,7 @@ export default function ImportModal({
     setStep('saving')
     let saved = 0
     let firstError: string | null = null
-    const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : mode === 'intesa' ? 'csv' : 'csv'
+    const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : mode === 'intesa' ? 'csv' : mode === 'bper' ? 'csv' : 'csv'
     for (const r of toSave) {
       const categoryId = r.category_id
         || categories.find(c => c.type === r.type)?.id
@@ -355,7 +398,7 @@ export default function ImportModal({
         type: r.type,
         category_id: categoryId,
         account_id: r.account_id || defaultAccountId,
-        budget_category_id: null,
+        budget_category_id: r.budget_category_id || null,
         family_id: profile.family_id,
         created_by: profile.id,
         source,
@@ -410,7 +453,8 @@ export default function ImportModal({
               { id: 'screenshot', icon: Image, label: 'Screenshot' },
               { id: 'pdf', icon: FileText, label: 'PDF' },
               { id: 'csv', icon: Table2, label: 'CSV / Excel' },
-              { id: 'intesa', icon: Building2, label: 'Intesa San Paolo' },
+              { id: 'intesa', icon: Building2, label: 'Intesa SP' },
+              { id: 'bper', icon: Building2, label: 'BPER EPY' },
             ] as const).map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
@@ -532,6 +576,37 @@ export default function ImportModal({
                     label="Trascina il file Excel di Intesa San Paolo o clicca per selezionarlo"
                     icon={<Building2 className="h-8 w-8 text-gray-300" />}
                     onFile={handleIntesaFile}
+                    disabled={false}
+                  />
+                </div>
+              )}
+
+              {/* BPER EPY upload */}
+              {mode === 'bper' && (
+                <div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Carica l'esportazione da BPER EPY (conto professionale):{' '}
+                    <strong>Home Banking → Movimenti → Lista Movimenti → Esporta (.xls)</strong>.
+                    Le spese professionali (commissioni, imposte, competenze, ecc.) vengono
+                    pre-assegnate alla macro-categoria <em>Spese Professionali</em>.
+                  </p>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Conto di provenienza
+                    </label>
+                    <select
+                      value={globalAccountId || defaultAccountId}
+                      onChange={e => setGlobalAccountId(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <DropZone
+                    accept=".xls,.xlsx"
+                    label="Trascina il file XLS di BPER EPY o clicca per selezionarlo"
+                    icon={<Building2 className="h-8 w-8 text-gray-300" />}
+                    onFile={handleBperFile}
                     disabled={false}
                   />
                 </div>
@@ -729,6 +804,11 @@ export default function ImportModal({
                           {row.intesaCategory && !row.category_id && (
                             <p className="text-[10px] text-gray-400 mt-0.5 max-w-[120px] truncate" title={row.intesaCategory}>
                               ISP: {row.intesaCategory}
+                            </p>
+                          )}
+                          {row.bperCategory && !row.category_id && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 max-w-[120px] truncate" title={row.bperCategory}>
+                              BPER: {row.bperCategory}
                             </p>
                           )}
                         </td>
