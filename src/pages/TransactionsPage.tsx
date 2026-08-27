@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate } from '../lib/utils'
-import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2, Pencil, Layers, RefreshCw, CheckSquare } from 'lucide-react'
+import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2, Pencil, Layers, RefreshCw, CheckSquare, Search } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -93,7 +93,12 @@ export default function TransactionsPage() {
       if (filterAccount && t.account_id !== filterAccount) return false
       if (filterDateFrom && t.date < filterDateFrom) return false
       if (filterDateTo && t.date > filterDateTo) return false
-      if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
+      if (search) {
+        const q = search.toLowerCase()
+        const inDesc = t.description?.toLowerCase().includes(q)
+        const inNote = t.note?.toLowerCase().includes(q)
+        if (!inDesc && !inNote) return false
+      }
       return true
     })
   }, [transactions, filterType, filterCategory, filterBudgetCategory, filterAccount, filterDateFrom, filterDateTo, search])
@@ -315,15 +320,30 @@ export default function TransactionsPage() {
         </div>
       </div>
 
+      {/* ── Search bar ──────────────────────────────────────────────────────── */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          placeholder="Cerca per descrizione o nota..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full border rounded-xl pl-9 pr-9 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white shadow-sm"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
       {/* ── Filters ─────────────────────────────────────────────────────────── */}
       {showFilters && (
         <div className="bg-white border rounded-xl p-4 mb-4 shadow-sm space-y-3">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <input
-              type="text" placeholder="Cerca descrizione..." value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="col-span-2 md:col-span-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
+          <div className="grid grid-cols-2 gap-3">
             <select value={filterType} onChange={e => setFilterType(e.target.value as any)}
               className="border rounded-lg px-3 py-2 text-sm focus:outline-none">
               <option value="all">Tutti i tipi</option>
