@@ -15,9 +15,9 @@ const txSchema = z.object({
   amount: z.coerce.number().positive('Importo non valido'),
   type: z.enum(['entrata', 'uscita']),
   description: z.string().min(1, 'Obbligatorio'),
-  category_id: z.string().min(1, 'Obbligatorio'),
+  budget_category_id: z.string().min(1, 'Seleziona una macrocategoria'),
+  category_id: z.string().optional(),
   account_id: z.string().min(1, 'Obbligatorio'),
-  budget_category_id: z.string().optional(),
   note: z.string().optional(),
 })
 type TxForm = z.infer<typeof txSchema>
@@ -25,7 +25,7 @@ type TxForm = z.infer<typeof txSchema>
 export default function TransactionsPage() {
   const {
     transactions, categories, accounts, budgetCategories, categoryBudgetMappings,
-    addTransaction, deleteTransaction, updateTransaction,
+    addTransaction, deleteTransaction, updateTransaction, addCategory,
     bulkDeleteTransactions, bulkUpdateTransactions, bulkDeleteByIds,
     viewMode, selectedMonth, selectedYear, customDateFrom, customDateTo,
   } = useAppStore()
@@ -72,6 +72,11 @@ export default function TransactionsPage() {
   const [bulkUpdateBudgetCategoryId, setBulkUpdateBudgetCategoryId] = useState('')
   const [bulkUpdating, setBulkUpdating] = useState(false)
   const [bulkUpdateError, setBulkUpdateError] = useState('')
+
+  // ── New category inline ──────────────────────────────────────────────────────
+  const [showNewCatInput, setShowNewCatInput] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [addingCat, setAddingCat] = useState(false)
 
   // ── AI suggest ───────────────────────────────────────────────────────────────
   const [suggestingCategory, setSuggestingCategory] = useState(false)
@@ -142,20 +147,23 @@ export default function TransactionsPage() {
   // ── Handlers ──────────────────────────────────────────────────────────────────
   const handleOpenAdd = () => {
     setEditingTx(null)
+    setShowNewCatInput(false); setNewCatName('')
     form.reset({
       date: new Date().toISOString().split('T')[0], type: 'uscita',
-      description: '', amount: undefined as any, category_id: '', account_id: '',
-      budget_category_id: '', note: '',
+      description: '', amount: undefined as any, budget_category_id: '',
+      category_id: '', account_id: '', note: '',
     })
     setShowModal(true)
   }
 
   const handleOpenEdit = (tx: any) => {
     setEditingTx(tx)
+    setShowNewCatInput(false); setNewCatName('')
     form.reset({
       date: tx.date, type: tx.type, description: tx.description, amount: tx.amount,
+      budget_category_id: tx.budget_category_id || '',
       category_id: tx.category_id || '', account_id: tx.account_id || '',
-      budget_category_id: tx.budget_category_id || '', note: tx.note || '',
+      note: tx.note || '',
     })
     setShowModal(true)
   }
@@ -164,19 +172,25 @@ export default function TransactionsPage() {
     if (!profile?.family_id) return
     if (editingTx) {
       const { error } = await updateTransaction(editingTx.id, {
-        ...data, budget_category_id: data.budget_category_id || null, note: data.note || null,
+        ...data,
+        category_id: data.category_id || null,
+        budget_category_id: data.budget_category_id || null,
+        note: data.note || null,
       })
       if (!error) { setShowModal(false); setEditingTx(null) }
     } else {
       const { error } = await addTransaction({
-        ...data, budget_category_id: data.budget_category_id || null,
+        ...data,
+        category_id: data.category_id || null,
+        budget_category_id: data.budget_category_id || null,
         family_id: profile.family_id, created_by: profile.id, source: 'manuale',
       })
       if (!error) {
         setShowModal(false)
         form.reset({
           date: new Date().toISOString().split('T')[0], type: 'uscita',
-          description: '', amount: undefined as any, category_id: '', account_id: '', note: '',
+          description: '', amount: undefined as any, budget_category_id: '',
+          category_id: '', account_id: '', note: '',
         })
       }
     }
@@ -250,6 +264,23 @@ export default function TransactionsPage() {
   const bulkUpdateFilteredCategories = categories.filter(c =>
     !bulkUpdateType || c.type === bulkUpdateType || c.type === 'risparmio')
 
+  const handleAddNewCategory = async () => {
+    if (!newCatName.trim() || !profile?.family_id) return
+    setAddingCat(true)
+    const { data, error } = await addCategory({
+      family_id: profile.family_id,
+      name: newCatName.trim(),
+      type: watchType,
+      color: '#94a3b8',
+    })
+    setAddingCat(false)
+    if (!error && data) {
+      form.setValue('category_id', data.id)
+      setShowNewCatInput(false)
+      setNewCatName('')
+    }
+  }
+
   const handleSuggestCategory = async () => {
     const desc = watchDescription?.trim()
     if (!desc || !getStoredApiKey()) return
@@ -261,13 +292,6 @@ export default function TransactionsPage() {
     if (budgetCategoryId) form.setValue('budget_category_id', budgetCategoryId)
     setSuggestingCategory(false)
   }
-
-  useEffect(() => {
-    if (watchCategoryId) {
-      const mapping = categoryBudgetMappings.find((m: any) => m.transaction_category_id === watchCategoryId)
-      form.setValue('budget_category_id', mapping?.budget_category_id || '')
-    }
-  }, [watchCategoryId, categoryBudgetMappings])
 
   const bulkDeleteValid = bulkMode === 'all'
     || (bulkMode === 'date' && bulkDateFrom && bulkDateTo && bulkDateFrom <= bulkDateTo)
@@ -594,14 +618,54 @@ export default function TransactionsPage() {
                   placeholder="es. Supermercato Esselunga" />
                 {form.formState.errors.description && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.description.message}</p>}
               </div>
+              {/* Macro categoria — obbligatoria */}
+              <div>
+                <label className="text-xs font-semibold text-gray-800">
+                  Macro categoria <span className="text-red-500">*</span>
+                </label>
+                <select {...form.register('budget_category_id')} className="mt-1 w-full border-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
+                  <option value="">— Seleziona macro categoria —</option>
+                  {budgetCategories.map((bc: any) => (
+                    <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                  ))}
+                </select>
+                {form.formState.errors.budget_category_id && (
+                  <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.budget_category_id.message}</p>
+                )}
+              </div>
+
+              {/* Categoria + Conto */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-gray-700">Categoria</label>
-                  <select {...form.register('category_id')} className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
-                    <option value="">Seleziona...</option>
-                    {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  {form.formState.errors.category_id && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.category_id.message}</p>}
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-gray-700">
+                      Categoria <span className="text-gray-400 font-normal">(opzionale)</span>
+                    </label>
+                    <button type="button" onClick={() => { setShowNewCatInput(v => !v); setNewCatName('') }}
+                      className="text-[10px] text-primary hover:underline">
+                      {showNewCatInput ? 'Annulla' : '+ Nuova'}
+                    </button>
+                  </div>
+                  {!showNewCatInput ? (
+                    <select {...form.register('category_id')} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
+                      <option value="">— Nessuna —</option>
+                      {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  ) : (
+                    <div className="flex gap-1">
+                      <input
+                        type="text" value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                        placeholder="Nome categoria..."
+                        className="flex-1 border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddNewCategory() } }}
+                      />
+                      <button type="button" onClick={handleAddNewCategory}
+                        disabled={!newCatName.trim() || addingCat}
+                        className="px-2 py-1.5 bg-primary text-white rounded-lg text-xs font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center">
+                        {addingCat ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Salva'}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-700">Conto</label>
@@ -612,19 +676,6 @@ export default function TransactionsPage() {
                   {form.formState.errors.account_id && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.account_id.message}</p>}
                 </div>
               </div>
-              {budgetCategories.length > 0 && (
-                <div>
-                  <label className="text-xs font-medium text-gray-700 flex items-center gap-1">
-                    Macro categoria <span className="text-gray-400 font-normal">(auto-suggerita)</span>
-                  </label>
-                  <select {...form.register('budget_category_id')} className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none bg-white">
-                    <option value="">— Non classificata —</option>
-                    {budgetCategories.map((bc: any) => (
-                      <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
               <div>
                 <label className="text-xs font-medium text-gray-700">Note (opzionale)</label>
                 <input {...form.register('note')}

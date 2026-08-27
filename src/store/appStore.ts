@@ -49,6 +49,7 @@ interface AppState {
   addBudgetCategory: (cat: any) => Promise<{ error: any; data?: any }>
   updateBudgetCategory: (id: string, updates: any) => Promise<{ error: any }>
   deleteBudgetCategory: (id: string) => Promise<{ error: any }>
+  addCategory: (cat: { family_id: string; name: string; type: 'entrata' | 'uscita' | 'risparmio'; color?: string }) => Promise<{ error: any; data?: any }>
   saveCategoryBudgetMapping: (familyId: string, txCategoryId: string, budgetCategoryId: string | null) => Promise<{ error: any }>
 }
 
@@ -280,6 +281,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => ({ budgetCategories: state.budgetCategories.filter(c => c.id !== id) }))
     }
     return { error }
+  },
+
+  addCategory: async (cat: { family_id: string; name: string; type: 'entrata' | 'uscita' | 'risparmio'; color?: string }) => {
+    const { data, error } = await supabase.from('categories').insert(cat).select().single()
+    if (!error && data) {
+      set(state => ({ categories: [...state.categories, data].sort((a: any, b: any) => a.name.localeCompare(b.name)) }))
+    }
+    return { error, data }
   },
 
   saveCategoryBudgetMapping: async (familyId, txCategoryId, budgetCategoryId) => {
