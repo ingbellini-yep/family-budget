@@ -13,16 +13,32 @@ import {
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, ChevronLeft, ChevronRight } from 'lucide-react'
 import PDFExportButton from '../components/PDFExportButton'
 import { exportDashboardSnapshot, exportTrackingMensile } from '../lib/usePDFExport'
+import PeriodSelector from '../components/PeriodSelector'
 
 const MONTHS_IT = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 const MONTH_NAMES = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
 
 export default function DashboardPage() {
-  const { transactions, categories, budgets, accounts, selectedMonth, selectedYear, setSelectedMonth, setSelectedYear, loadTransactions } = useAppStore()
+  const {
+    transactions, categories, budgets, accounts,
+    selectedMonth, selectedYear, viewMode, customDateFrom, customDateTo,
+    setSelectedMonth, setSelectedYear, loadTransactions,
+  } = useAppStore()
   const { profile } = useAuthStore()
   const [historicalData, setHistoricalData] = useState<any[]>([])
 
-  // Summary for selected month
+  // Period label for subtitle
+  const periodLabel = useMemo(() => {
+    if (viewMode === 'month') return `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
+    if (viewMode === 'year') return `Anno ${selectedYear}`
+    if (customDateFrom && customDateTo) {
+      const fmt = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })
+      return `${fmt(customDateFrom)} – ${fmt(customDateTo)}`
+    }
+    return 'Periodo personalizzato'
+  }, [viewMode, selectedMonth, selectedYear, customDateFrom, customDateTo])
+
+  // Summary for selected period
   const summary = useMemo(() => {
     const income = transactions.filter(t => t.type === 'entrata').reduce((s, t) => s + t.amount, 0)
     const expenses = transactions.filter(t => t.type === 'uscita').reduce((s, t) => s + t.amount, 0)
@@ -31,8 +47,9 @@ export default function DashboardPage() {
     return { income, expenses, balance, savingsRate }
   }, [transactions])
 
-  // Budget status per category
+  // Budget status — only meaningful in month view
   const budgetStatus = useMemo(() => {
+    if (viewMode !== 'month') return []
     const expenseCategories = categories.filter(c => c.type === 'uscita')
     return expenseCategories.map(cat => {
       const catBudget = budgets.find(b => b.category_id === cat.id && (b.month === selectedMonth || b.month === null))
@@ -44,7 +61,7 @@ export default function DashboardPage() {
       const status = percentage >= 100 ? 'red' : percentage >= 80 ? 'yellow' : 'green'
       return { categoryId: cat.id, categoryName: cat.name, color: cat.color || '#94a3b8', budgeted, spent, remaining: budgeted - spent, percentage, status }
     }).filter(b => b.budgeted > 0 || b.spent > 0)
-  }, [categories, budgets, transactions, selectedMonth])
+  }, [categories, budgets, transactions, selectedMonth, viewMode])
 
   // Pie chart data
   const pieData = useMemo(() => {
@@ -58,7 +75,7 @@ export default function DashboardPage() {
     return Object.values(byCat).sort((a, b) => b.value - a.value).slice(0, 8)
   }, [transactions, categories])
 
-  // Load historical data (last 12 months)
+  // Load historical data (last 12 months) — always based on current selected month/year
   useEffect(() => {
     if (!profile?.family_id) return
     const familyId = profile.family_id
@@ -84,18 +101,6 @@ export default function DashboardPage() {
     }
     loadHistorical()
   }, [profile?.family_id, selectedMonth, selectedYear])
-
-  const prevMonth = () => {
-    if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear(selectedYear - 1) }
-    else setSelectedMonth(selectedMonth - 1)
-    if (profile?.family_id) loadTransactions(profile.family_id, selectedMonth === 1 ? selectedYear - 1 : selectedYear, selectedMonth === 1 ? 12 : selectedMonth - 1)
-  }
-
-  const nextMonth = () => {
-    if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear(selectedYear + 1) }
-    else setSelectedMonth(selectedMonth + 1)
-    if (profile?.family_id) loadTransactions(profile.family_id, selectedMonth === 12 ? selectedYear + 1 : selectedYear, selectedMonth === 12 ? 1 : selectedMonth + 1)
-  }
 
   const dashboardRef = useRef<HTMLDivElement>(null)
 
@@ -136,6 +141,19 @@ export default function DashboardPage() {
     const remaining = limit - ownSpent
     const pct = limit > 0 ? Math.min((ownSpent / limit) * 100, 100) : 0
 
+    const prevMonth = () => {
+      const nm = selectedMonth === 1 ? 12 : selectedMonth - 1
+      const ny = selectedMonth === 1 ? selectedYear - 1 : selectedYear
+      setSelectedMonth(nm); setSelectedYear(ny)
+      if (profile?.family_id) loadTransactions(profile.family_id, ny, nm)
+    }
+    const nextMonth = () => {
+      const nm = selectedMonth === 12 ? 1 : selectedMonth + 1
+      const ny = selectedMonth === 12 ? selectedYear + 1 : selectedYear
+      setSelectedMonth(nm); setSelectedYear(ny)
+      if (profile?.family_id) loadTransactions(profile.family_id, ny, nm)
+    }
+
     return (
       <div className="p-4 md:p-6 space-y-6 pb-20 md:pb-6">
         <div className="flex items-center justify-between">
@@ -150,7 +168,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Pocket money card */}
         <div className="bg-gradient-to-br from-orange-400 to-amber-500 rounded-2xl p-6 text-white shadow-lg">
           <div className="flex items-center gap-3 mb-4">
             <PocketIcon className="h-6 w-6" />
@@ -173,7 +190,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Own transactions */}
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b">
             <h2 className="font-semibold text-sm text-gray-900">Le mie transazioni — {MONTH_NAMES[selectedMonth - 1]}</h2>
@@ -210,24 +226,14 @@ export default function DashboardPage() {
   return (
     <div className="p-4 md:p-6 space-y-6 pb-20 md:pb-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Panoramica finanziaria</p>
+          <p className="text-sm text-muted-foreground">{periodLabel}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <PDFExportButton options={pdfOptions} label="PDF" size="sm" />
-          <div className="flex items-center gap-2 bg-white border rounded-xl px-3 py-2 shadow-sm">
-            <button onClick={prevMonth} className="text-gray-400 hover:text-gray-700">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="text-sm font-medium min-w-[120px] text-center">
-              {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-            </span>
-            <button onClick={nextMonth} className="text-gray-400 hover:text-gray-700">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+          <PeriodSelector />
         </div>
       </div>
 
@@ -265,8 +271,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Budget Status */}
-      {budgetStatus.length > 0 && (
+      {/* Budget Status — solo in vista mensile */}
+      {viewMode === 'month' && budgetStatus.length > 0 && (
         <div className="bg-white rounded-xl p-4 shadow-sm border">
           <h2 className="text-base font-semibold mb-4">Stato Budget</h2>
           <div className="space-y-3">
@@ -298,7 +304,7 @@ export default function DashboardPage() {
 
       {/* Charts */}
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Bar chart: income vs expenses */}
+        {/* Bar chart: income vs expenses (ultimi 12 mesi) */}
         <div className="bg-white rounded-xl p-4 shadow-sm border">
           <h2 className="text-base font-semibold mb-4">Entrate vs Uscite (12 mesi)</h2>
           <ResponsiveContainer width="100%" height={220}>
@@ -316,7 +322,8 @@ export default function DashboardPage() {
 
         {/* Pie chart: expenses by category */}
         <div className="bg-white rounded-xl p-4 shadow-sm border">
-          <h2 className="text-base font-semibold mb-4">Uscite per Categoria</h2>
+          <h2 className="text-base font-semibold mb-1">Uscite per Categoria</h2>
+          <p className="text-xs text-gray-400 mb-3">{periodLabel}</p>
           {pieData.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
@@ -338,7 +345,7 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           ) : (
             <div className="h-[220px] flex items-center justify-center text-gray-400 text-sm">
-              Nessuna uscita questo mese
+              Nessuna uscita nel periodo
             </div>
           )}
         </div>

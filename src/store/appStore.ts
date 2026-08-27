@@ -15,10 +15,16 @@ interface AppState {
   yearTransactions: any[]
   selectedMonth: number
   selectedYear: number
+  viewMode: 'month' | 'year' | 'custom'
+  customDateFrom: string
+  customDateTo: string
   loading: boolean
 
   setSelectedMonth: (month: number) => void
   setSelectedYear: (year: number) => void
+  setViewMode: (mode: 'month' | 'year' | 'custom') => void
+  setCustomDates: (from: string, to: string) => void
+  reloadTransactions: (familyId: string) => Promise<void>
   loadAccounts: (familyId: string) => Promise<void>
   loadCategories: (familyId: string) => Promise<void>
   loadTransactions: (familyId: string, year: number, month: number) => Promise<void>
@@ -61,10 +67,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   yearTransactions: [],
   selectedMonth: now.getMonth() + 1,
   selectedYear: now.getFullYear(),
+  viewMode: 'month',
+  customDateFrom: '',
+  customDateTo: '',
   loading: false,
 
   setSelectedMonth: (month) => set({ selectedMonth: month }),
   setSelectedYear: (year) => set({ selectedYear: year }),
+  setViewMode: (mode) => set({ viewMode: mode }),
+  setCustomDates: (from, to) => set({ customDateFrom: from, customDateTo: to }),
+
+  reloadTransactions: async (familyId) => {
+    const { viewMode, selectedYear, selectedMonth, customDateFrom, customDateTo } = get()
+    let query = supabase.from('transactions').select('*').eq('family_id', familyId)
+    if (viewMode === 'month') {
+      const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`
+      const endDate = new Date(selectedYear, selectedMonth, 0).toISOString().split('T')[0]
+      query = query.gte('date', startDate).lte('date', endDate)
+    } else if (viewMode === 'year') {
+      query = query.gte('date', `${selectedYear}-01-01`).lte('date', `${selectedYear}-12-31`)
+    } else if (viewMode === 'custom' && customDateFrom && customDateTo) {
+      query = query.gte('date', customDateFrom).lte('date', customDateTo)
+    } else {
+      return
+    }
+    const { data } = await query.order('date', { ascending: false })
+    set({ transactions: data || [] })
+  },
 
   loadAccounts: async (familyId) => {
     const { data } = await supabase.from('accounts').select('*').eq('family_id', familyId).order('name')
@@ -110,7 +139,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await Promise.all([
       get().loadAccounts(familyId),
       get().loadCategories(familyId),
-      get().loadTransactions(familyId, selectedYear, selectedMonth),
+      get().reloadTransactions(familyId),
       get().loadBudgets(familyId, selectedYear),
       get().loadRecurringExpenses(familyId),
       get().loadSavingsGoals(familyId),

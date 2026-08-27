@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import ImportModal from '../components/ImportModal'
+import PeriodSelector from '../components/PeriodSelector'
 import { suggestCategory, getStoredApiKey } from '../lib/claudeAI'
 
 const txSchema = z.object({
@@ -26,7 +27,7 @@ export default function TransactionsPage() {
     transactions, categories, accounts, budgetCategories, categoryBudgetMappings,
     addTransaction, deleteTransaction, updateTransaction,
     bulkDeleteTransactions, bulkUpdateTransactions, bulkDeleteByIds,
-    selectedMonth, selectedYear,
+    viewMode, selectedMonth, selectedYear, customDateFrom, customDateTo,
   } = useAppStore()
   const { profile } = useAuthStore()
 
@@ -277,12 +278,9 @@ export default function TransactionsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Transazioni</h1>
-          <p className="text-sm text-muted-foreground">
-            {new Intl.DateTimeFormat('it-IT', { month: 'long', year: 'numeric' })
-              .format(new Date(selectedYear, selectedMonth - 1))}
-          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <PeriodSelector />
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium transition-colors ${
