@@ -9,6 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import ImportModal from '../components/ImportModal'
 import PeriodSelector from '../components/PeriodSelector'
 import { suggestCategory, getStoredApiKey } from '../lib/claudeAI'
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const txSchema = z.object({
   date: z.string().min(1, 'Obbligatorio'),
@@ -24,9 +25,9 @@ type TxForm = z.infer<typeof txSchema>
 
 export default function TransactionsPage() {
   const {
-    transactions, categories, accounts, budgetCategories, categoryBudgetMappings,
+    transactions, categories, accounts, budgetCategories, budgetItems, categoryBudgetMappings,
     addTransaction, deleteTransaction, updateTransaction, addCategory,
-    bulkDeleteTransactions, bulkUpdateTransactions, bulkDeleteByIds,
+    bulkDeleteTransactions, bulkUpdateTransactions, bulkDeleteByIds, loadBudgetItems,
     viewMode, selectedMonth, selectedYear, customDateFrom, customDateTo,
   } = useAppStore()
   const { profile } = useAuthStore()
@@ -80,6 +81,8 @@ export default function TransactionsPage() {
 
   // ── AI suggest ───────────────────────────────────────────────────────────────
   const [suggestingCategory, setSuggestingCategory] = useState(false)
+  const [showDashboard, setShowDashboard] = useState(false)
+  const [formBudgetType, setFormBudgetType] = useState<'familiare' | 'professionale'>('familiare')
 
   const form = useForm<TxForm>({
     resolver: zodResolver(txSchema),
@@ -153,6 +156,7 @@ export default function TransactionsPage() {
       description: '', amount: undefined as any, budget_category_id: '',
       category_id: '', account_id: '', note: '',
     })
+    setFormBudgetType('familiare')
     setShowModal(true)
   }
 
@@ -165,6 +169,8 @@ export default function TransactionsPage() {
       category_id: tx.category_id || '', account_id: tx.account_id || '',
       note: tx.note || '',
     })
+    const existingBc = budgetCategories.find((bc: any) => bc.id === tx.budget_category_id)
+    setFormBudgetType(existingBc?.budget_type === 'professionale' ? 'professionale' : 'familiare')
     setShowModal(true)
   }
 
@@ -300,6 +306,46 @@ export default function TransactionsPage() {
   const bulkUpdateCount = bulkUpdateScope === 'selected' ? selectedIds.size : filtered.length
   const bulkUpdateValid = (bulkUpdateType || bulkUpdateCategoryId || bulkUpdateBudgetCategoryId) && bulkUpdateCount > 0
 
+  const CHART_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#84cc16']
+
+  const pieData = useMemo(() => {
+    const map = new Map<string, number>()
+    filtered.filter(t => t.type === 'uscita' && t.budget_category_id).forEach(t => {
+      const name = budgetCategories.find((bc: any) => bc.id === t.budget_category_id)?.name || 'Altro'
+      map.set(name, (map.get(name) || 0) + t.amount)
+    })
+    return Array.from(map.entries()).map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 })).sort((a, b) => b.value - a.value)
+  }, [filtered, budgetCategories])
+
+  const barData = useMemo(() => {
+    const budgetByCategory = new Map<string, number>()
+    budgetItems.forEach((item: any) => {
+      if (!item.budget_category_id || item.active === false) return
+      let monthly = 0
+      if (item.recurrence === 'monthly') monthly = item.amount
+      else if (item.recurrence === 'annual') monthly = item.amount / 12
+      else if (item.recurrence === 'weekly') monthly = item.amount * 4.33
+      else if (item.recurrence === 'quarterly') monthly = item.amount / 3
+      else monthly = item.amount / 6
+      budgetByCategory.set(item.budget_category_id, (budgetByCategory.get(item.budget_category_id) || 0) + monthly)
+    })
+    const actualByCategory = new Map<string, number>()
+    filtered.filter(t => t.type === 'uscita' && t.budget_category_id).forEach(t => {
+      actualByCategory.set(t.budget_category_id, (actualByCategory.get(t.budget_category_id) || 0) + t.amount)
+    })
+    const ids = new Set([...budgetByCategory.keys(), ...actualByCategory.keys()])
+    return Array.from(ids).map(id => {
+      const cat = budgetCategories.find((bc: any) => bc.id === id)
+      return {
+        name: (cat?.name || 'Altro').length > 12 ? (cat?.name || 'Altro').slice(0, 12) + '…' : (cat?.name || 'Altro'),
+        Budget: Math.round(budgetByCategory.get(id) || 0),
+        Effettivo: Math.round(actualByCategory.get(id) || 0),
+      }
+    }).sort((a, b) => b.Effettivo - a.Effettivo).slice(0, 8)
+  }, [filtered, budgetCategories, budgetItems])
+
+  const filteredBudgetCategories = budgetCategories.filter((bc: any) => bc.budget_type === formBudgetType)
+
   return (
     <div className="p-4 md:p-6 pb-28 md:pb-6">
 
@@ -343,6 +389,52 @@ export default function TransactionsPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Mini dashboard toggle ───────────────────────────────────────────── */}
+      {pieData.length > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowDashboard(v => !v)}
+            className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <span>{showDashboard ? '▲' : '▼'}</span>
+            <span>{showDashboard ? 'Nascondi analisi' : 'Mostra analisi macrocategorie'}</span>
+          </button>
+          {showDashboard && (
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Pie */}
+              <div className="bg-white border rounded-xl p-3 shadow-sm">
+                <p className="text-xs font-semibold text-gray-600 mb-2">Uscite per macrocategoria</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} paddingAngle={2}>
+                      {pieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => `€ ${v.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '10px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Bar */}
+              <div className="bg-white border rounded-xl p-3 shadow-sm">
+                <p className="text-xs font-semibold text-gray-600 mb-2">
+                  Budget vs Effettivo {viewMode === 'month' ? '(mensile)' : ''}
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={barData} layout="vertical" margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
+                    <XAxis type="number" tick={{ fontSize: 9 }} tickFormatter={(v: number) => `${v}€`} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={80} />
+                    <Tooltip formatter={(v: number) => `€ ${v.toLocaleString('it-IT')}`} />
+                    <Legend iconSize={8} wrapperStyle={{ fontSize: '10px' }} />
+                    {viewMode === 'month' && <Bar dataKey="Budget" fill="#e2e8f0" radius={[0, 3, 3, 0]} />}
+                    <Bar dataKey="Effettivo" fill="#6366f1" radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Search bar ──────────────────────────────────────────────────────── */}
       <div className="relative mb-4">
@@ -618,17 +710,43 @@ export default function TransactionsPage() {
                   placeholder="es. Supermercato Esselunga" />
                 {form.formState.errors.description && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.description.message}</p>}
               </div>
+              {/* Familiare / Professionale toggle */}
+              <div>
+                <label className="text-xs font-semibold text-gray-800 block mb-1">
+                  Tipo spesa <span className="text-red-500">*</span>
+                </label>
+                <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+                  <button type="button"
+                    onClick={() => { setFormBudgetType('familiare'); form.setValue('budget_category_id', '') }}
+                    className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'familiare' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                    🏠 Familiare
+                  </button>
+                  <button type="button"
+                    onClick={() => { setFormBudgetType('professionale'); form.setValue('budget_category_id', '') }}
+                    className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'professionale' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                    💼 Professionale
+                  </button>
+                </div>
+              </div>
+
               {/* Macro categoria — obbligatoria */}
               <div>
                 <label className="text-xs font-semibold text-gray-800">
                   Macro categoria <span className="text-red-500">*</span>
                 </label>
-                <select {...form.register('budget_category_id')} className="mt-1 w-full border-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
-                  <option value="">— Seleziona macro categoria —</option>
-                  {budgetCategories.map((bc: any) => (
-                    <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
-                  ))}
-                </select>
+                {filteredBudgetCategories.length === 0 ? (
+                  <p className="mt-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    Nessuna macrocategoria {formBudgetType === 'professionale' ? 'professionale' : 'familiare'} trovata.{' '}
+                    {formBudgetType === 'professionale' && 'Creane una in Budget → sezione C.'}
+                  </p>
+                ) : (
+                  <select {...form.register('budget_category_id')} className="mt-1 w-full border-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
+                    <option value="">— Seleziona —</option>
+                    {filteredBudgetCategories.map((bc: any) => (
+                      <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                    ))}
+                  </select>
+                )}
                 {form.formState.errors.budget_category_id && (
                   <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.budget_category_id.message}</p>
                 )}

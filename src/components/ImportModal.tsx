@@ -372,6 +372,7 @@ export default function ImportModal({
         updated[i].description, categories, budgetCategories, apiKey,
       ).catch(() => ({ categoryId: null, budgetCategoryId: null }))
       if (categoryId) updated[i] = { ...updated[i], category_id: categoryId }
+      if (budgetCategoryId) updated[i] = { ...updated[i], budget_category_id: budgetCategoryId }
       setRows([...updated])
     }
     setLoading(false)
@@ -698,7 +699,7 @@ export default function ImportModal({
                     className="px-2 py-1 bg-purple-50 text-purple-700 rounded-full flex items-center gap-1 hover:bg-purple-100"
                   >
                     <Sparkles className="h-3 w-3" />
-                    Suggerisci categorie AI
+                    Suggerisci macro categoria AI
                   </button>
                 )}
                 <div className="flex items-center gap-1.5 ml-auto">
@@ -734,6 +735,7 @@ export default function ImportModal({
                       <th className="px-2 py-2 text-right">Importo</th>
                       <th className="px-2 py-2">Tipo</th>
                       <th className="px-2 py-2">Categoria</th>
+                      <th className="px-2 py-2">Macrocategoria</th>
                       <th className="px-2 py-2">Conto</th>
                       <th className="px-2 py-2 w-8"></th>
                     </tr>
@@ -811,6 +813,18 @@ export default function ImportModal({
                               BPER: {row.bperCategory}
                             </p>
                           )}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <select
+                            value={row.budget_category_id || ''}
+                            onChange={e => setRows(rs => rs.map(r => r._id === row._id ? { ...r, budget_category_id: e.target.value || undefined } : r))}
+                            className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[130px]"
+                          >
+                            <option value="">— —</option>
+                            {budgetCategories.map((bc: any) => (
+                              <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                            ))}
+                          </select>
                         </td>
                         <td className="px-2 py-1.5">
                           <select
