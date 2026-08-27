@@ -834,9 +834,13 @@ export default function ImportModal({
                             className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[130px]"
                           >
                             <option value="">— —</option>
-                            {budgetCategories.map((bc: any) => (
-                              <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
-                            ))}
+                            {budgetCategories
+                              .filter((bc: any) => row.type === 'entrata'
+                                ? bc.name.startsWith('A-')
+                                : !bc.name.startsWith('A-'))
+                              .map((bc: any) => (
+                                <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                              ))}
                           </select>
                         </td>
                         <td className="px-2 py-1.5">

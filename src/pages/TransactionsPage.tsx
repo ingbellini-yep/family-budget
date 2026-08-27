@@ -350,7 +350,11 @@ export default function TransactionsPage() {
     }).sort((a, b) => b.Effettivo - a.Effettivo).slice(0, 8)
   }, [filtered, budgetCategories, budgetItems])
 
-  const filteredBudgetCategories = budgetCategories.filter((bc: any) => bc.budget_type === formBudgetType)
+  const isIncomeMacro = (bc: any) => bc.name.startsWith('A-')
+  const filteredBudgetCategories = budgetCategories.filter((bc: any) => {
+    if (watchType === 'entrata') return isIncomeMacro(bc)
+    return bc.budget_type === formBudgetType && !isIncomeMacro(bc)
+  })
 
   return (
     <div className="p-4 md:p-6 pb-28 md:pb-6">
@@ -721,24 +725,26 @@ export default function TransactionsPage() {
                   placeholder="es. Supermercato Esselunga" />
                 {form.formState.errors.description && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.description.message}</p>}
               </div>
-              {/* Familiare / Professionale toggle */}
-              <div>
-                <label className="text-xs font-semibold text-gray-800 block mb-1">
-                  Tipo spesa <span className="text-red-500">*</span>
-                </label>
-                <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
-                  <button type="button"
-                    onClick={() => { setFormBudgetType('familiare'); form.setValue('budget_category_id', '') }}
-                    className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'familiare' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-                    🏠 Familiare
-                  </button>
-                  <button type="button"
-                    onClick={() => { setFormBudgetType('professionale'); form.setValue('budget_category_id', '') }}
-                    className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'professionale' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-                    💼 Professionale
-                  </button>
+              {/* Familiare / Professionale toggle — solo per uscite */}
+              {watchType === 'uscita' && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-800 block mb-1">
+                    Tipo spesa <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+                    <button type="button"
+                      onClick={() => { setFormBudgetType('familiare'); form.setValue('budget_category_id', '') }}
+                      className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'familiare' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                      🏠 Familiare
+                    </button>
+                    <button type="button"
+                      onClick={() => { setFormBudgetType('professionale'); form.setValue('budget_category_id', '') }}
+                      className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'professionale' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                      💼 Professionale
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Macro categoria — obbligatoria */}
               <div>
@@ -747,8 +753,9 @@ export default function TransactionsPage() {
                 </label>
                 {filteredBudgetCategories.length === 0 ? (
                   <p className="mt-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    Nessuna macrocategoria {formBudgetType === 'professionale' ? 'professionale' : 'familiare'} trovata.{' '}
-                    {formBudgetType === 'professionale' && 'Creane una in Budget → sezione C.'}
+                    {watchType === 'entrata'
+                      ? 'Nessuna macrocategoria entrate trovata. Aggiungine una in Budget.'
+                      : `Nessuna macrocategoria ${formBudgetType === 'professionale' ? 'professionale' : 'familiare'} trovata.${formBudgetType === 'professionale' ? ' Creane una in Budget → sezione C.' : ''}`}
                   </p>
                 ) : (
                   <select {...form.register('budget_category_id')} className="mt-1 w-full border-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
