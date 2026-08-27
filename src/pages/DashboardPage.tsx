@@ -21,6 +21,7 @@ const MONTH_NAMES = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno
 export default function DashboardPage() {
   const {
     transactions, categories, budgets, accounts,
+    budgetCategories, budgetItems,
     selectedMonth, selectedYear, viewMode, customDateFrom, customDateTo,
     setSelectedMonth, setSelectedYear, loadTransactions,
   } = useAppStore()
@@ -74,6 +75,47 @@ export default function DashboardPage() {
     })
     return Object.values(byCat).sort((a, b) => b.value - a.value).slice(0, 8)
   }, [transactions, categories])
+
+  const MACRO_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#84cc16']
+
+  // Macrocategory summary: actual spending + budget per macrocategory
+  const macroCategoryData = useMemo(() => {
+    const actualMap = new Map<string, number>()
+    transactions.filter(t => t.type === 'uscita' && t.budget_category_id).forEach(t => {
+      actualMap.set(t.budget_category_id, (actualMap.get(t.budget_category_id) || 0) + t.amount)
+    })
+    const budgetMap = new Map<string, number>()
+    budgetItems.forEach((item: any) => {
+      if (!item.budget_category_id || item.active === false) return
+      let amount = 0
+      if (viewMode === 'month' || viewMode === 'custom') {
+        if (item.recurrence === 'monthly') amount = item.amount
+        else if (item.recurrence === 'annual') amount = item.amount / 12
+        else if (item.recurrence === 'weekly') amount = item.amount * 4.33
+        else if (item.recurrence === 'quarterly') amount = item.amount / 3
+        else amount = item.amount / 6
+      } else {
+        if (item.recurrence === 'annual') amount = item.amount
+        else if (item.recurrence === 'monthly') amount = item.amount * 12
+        else if (item.recurrence === 'weekly') amount = item.amount * 52
+        else if (item.recurrence === 'quarterly') amount = item.amount * 4
+        else amount = item.amount * 2
+      }
+      budgetMap.set(item.budget_category_id, (budgetMap.get(item.budget_category_id) || 0) + amount)
+    })
+    const allIds = new Set([...actualMap.keys(), ...budgetMap.keys()])
+    return Array.from(allIds).map(id => {
+      const bc = budgetCategories.find((bc: any) => bc.id === id)
+      if (!bc) return null
+      const spent = actualMap.get(id) || 0
+      const budget = budgetMap.get(id) || 0
+      const pct = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
+      const status: 'none' | 'green' | 'yellow' | 'red' = budget === 0 ? 'none' : pct >= 100 ? 'red' : pct >= 80 ? 'yellow' : 'green'
+      return { id, name: bc.name, icon: bc.icon || '', budget_type: bc.budget_type as string, spent, budget, pct, status }
+    }).filter(Boolean).sort((a, b) => b!.spent - a!.spent) as Array<{ id: string; name: string; icon: string; budget_type: string; spent: number; budget: number; pct: number; status: 'none' | 'green' | 'yellow' | 'red' }>
+  }, [transactions, budgetCategories, budgetItems, viewMode])
+
+  const macroPieData = useMemo(() => macroCategoryData.map(d => ({ name: d.name, value: Math.round(d.spent) })), [macroCategoryData])
 
   // Load historical data (last 12 months) — always based on current selected month/year
   useEffect(() => {
@@ -270,6 +312,91 @@ export default function DashboardPage() {
           <div className="text-xl font-bold text-purple-600">{summary.savingsRate.toFixed(1)}%</div>
         </div>
       </div>
+
+      {/* Macrocategory Summary */}
+      {macroCategoryData.length > 0 && (
+        <div className="bg-white rounded-xl p-5 shadow-sm border">
+          <h2 className="text-lg font-bold mb-4">Riepilogo Macrocategorie</h2>
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Left: Progress bars grouped by budget_type */}
+            <div className="space-y-5">
+              {(['familiare', 'professionale'] as const).map(btype => {
+                const group = macroCategoryData.filter(d => d.budget_type === btype)
+                if (group.length === 0) return null
+                return (
+                  <div key={btype}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                      {btype === 'familiare' ? 'Familiari' : 'Professionali'}
+                    </h3>
+                    <div className="space-y-3">
+                      {group.map(d => (
+                        <div key={d.id}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {d.icon && <span className="text-base leading-none">{d.icon}</span>}
+                              <span className="text-sm font-medium text-gray-700 truncate">{d.name}</span>
+                              {d.budget > 0 && (
+                                <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                  d.status === 'green' ? 'bg-green-100 text-green-700' :
+                                  d.status === 'yellow' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-red-100 text-red-700'
+                                }`}>
+                                  {d.status === 'green' ? 'OK' : d.status === 'yellow' ? 'Attenzione' : 'Sforato'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500 shrink-0 ml-2">
+                              {formatCurrency(d.spent)}{d.budget > 0 && ` / ${formatCurrency(d.budget)}`}
+                            </div>
+                          </div>
+                          {d.budget > 0 ? (
+                            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  d.status === 'green' ? 'bg-green-500' :
+                                  d.status === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${d.pct}%` }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="h-2.5 bg-indigo-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-indigo-400 rounded-full" style={{ width: '100%' }} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {/* Right: Pie chart */}
+            {macroPieData.length > 0 && (
+              <div className="flex flex-col items-center">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie data={macroPieData} cx="50%" cy="50%" outerRadius={90} dataKey="value" nameKey="name" label={false}>
+                      {macroPieData.map((_entry, i) => (
+                        <Cell key={i} fill={MACRO_COLORS[i % MACRO_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
+                  {macroPieData.map((entry, i) => (
+                    <div key={i} className="flex items-center gap-1 text-xs text-gray-600">
+                      <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MACRO_COLORS[i % MACRO_COLORS.length] }} />
+                      {entry.name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Budget Status — solo in vista mensile */}
       {viewMode === 'month' && budgetStatus.length > 0 && (
