@@ -120,6 +120,88 @@ const defaultForm = (): {
   target_amount: '', target_date: '', planned_account_id: null,
 })
 
+function BudgetCategorySection({
+  label, title, icon, total, categories, expenseItems, savingItems,
+  expanded, setExpanded, onAddItem, onEditItem, onDeleteItem,
+  onAddCategory, onEditCategory, onDeleteCategory, emptyLabel, accentColor,
+}: {
+  label: string; title: string; icon: string; total: number
+  categories: any[]; expenseItems: any[]; savingItems: any[]
+  expanded: Record<string, boolean>; setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
+  onAddItem: (type: ItemType, catId?: string) => void
+  onEditItem: (item: any) => void; onDeleteItem: (id: string) => void
+  onAddCategory: () => void; onEditCategory: (cat: any) => void; onDeleteCategory: (id: string) => void
+  emptyLabel: string; accentColor?: string
+}) {
+  const color = accentColor || '#6366f1'
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-gray-700 flex items-center gap-2 text-sm">
+          <span className="text-base">{icon}</span>
+          {label} · {title}
+          <span className="text-gray-500 font-normal">{formatCurrency(total)}</span>
+        </h2>
+        <button onClick={onAddCategory}
+          className="text-xs text-gray-500 border px-2.5 py-1.5 rounded-lg hover:bg-gray-50 flex items-center gap-1">
+          <Plus className="h-3 w-3" /> Macrovoce
+        </button>
+      </div>
+      {categories.length === 0 && (
+        <div className="bg-white rounded-xl border shadow-sm text-center py-6 text-gray-400 text-sm">
+          {emptyLabel}{' '}
+          <button onClick={onAddCategory} className="underline hover:text-gray-600">Aggiungi macrovoce</button>
+        </div>
+      )}
+      {categories.map((cat: any) => {
+        const catItems = [
+          ...expenseItems.filter((i: any) => i.budget_category_id === cat.id),
+          ...savingItems.filter((i: any) => i.budget_category_id === cat.id),
+        ]
+        const catTotal = catItems.reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+        const isOpen = expanded[cat.id] !== false
+        return (
+          <div key={cat.id} className="bg-white rounded-xl border shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b cursor-pointer hover:bg-gray-50"
+              style={{ borderLeftWidth: 3, borderLeftColor: cat.color || color }}
+              onClick={() => setExpanded(e => ({ ...e, [cat.id]: !isOpen }))}>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span>{cat.icon || '📦'}</span>
+                <span className="font-medium text-gray-800 text-sm truncate">{cat.name}</span>
+                <span className="text-xs text-gray-400">{formatCurrency(catTotal)}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={e => { e.stopPropagation(); onEditCategory(cat) }}
+                  className="p-1 text-gray-300 hover:text-gray-600"><Edit2 className="h-3.5 w-3.5" /></button>
+                <button onClick={e => { e.stopPropagation(); onDeleteCategory(cat.id) }}
+                  className="p-1 text-gray-300 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                {isOpen ? <ChevronUp className="h-4 w-4 text-gray-300" /> : <ChevronDown className="h-4 w-4 text-gray-300" />}
+              </div>
+            </div>
+            {isOpen && (
+              <>
+                {catItems.length === 0
+                  ? <div className="py-4 text-center text-sm text-gray-400">Nessuna voce</div>
+                  : <div className="divide-y">{catItems.map((item: any) => <ItemRow key={item.id} item={item} onEdit={() => onEditItem(item)} onDelete={() => onDeleteItem(item.id)} />)}</div>
+                }
+                <div className="px-4 py-2 border-t bg-gray-50 flex gap-3">
+                  <button onClick={() => onAddItem('expense', cat.id)} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                    <Plus className="h-3 w-3" /> Spesa
+                  </button>
+                  <span className="text-gray-300">·</span>
+                  <button onClick={() => onAddItem('saving_goal', cat.id)} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                    <Plus className="h-3 w-3" /> Obiettivo risparmio
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function BudgetPage() {
   const {
     budgetCategories, budgetItems, categoryBudgetMappings, yearTransactions,
@@ -141,7 +223,7 @@ export default function BudgetPage() {
   const [saving, setSaving] = useState(false)
 
   const [catModal, setCatModal] = useState<{ mode: 'add' | 'edit'; cat?: any } | null>(null)
-  const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#6366f1' })
+  const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#6366f1', budget_type: 'familiare' as 'familiare' | 'professionale' })
 
   const [mappingModal, setMappingModal] = useState(false)
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({})
@@ -184,10 +266,29 @@ export default function BudgetPage() {
   const expenseItems = useMemo(() => budgetItems.filter((i: any) => i.type === 'expense'), [budgetItems])
   const savingItems = useMemo(() => budgetItems.filter((i: any) => i.type === 'saving_goal'), [budgetItems])
 
+  // ── split categories by type
+  const familyCategories = useMemo(() => budgetCategories.filter((c: any) => c.budget_type !== 'professionale'), [budgetCategories])
+  const professionalCategories = useMemo(() => budgetCategories.filter((c: any) => c.budget_type === 'professionale'), [budgetCategories])
+
   // ── annual totals
   const incomeTotal = incomeItems.reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
   const expenseTotal = expenseItems.reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
   const savingTotal = savingItems.reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+
+  const familyExpenseTotal = useMemo(() => {
+    const familyCatIds = new Set(familyCategories.map((c: any) => c.id))
+    return [...expenseItems, ...savingItems]
+      .filter((i: any) => !i.budget_category_id || familyCatIds.has(i.budget_category_id))
+      .reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+  }, [expenseItems, savingItems, familyCategories])
+
+  const professionalExpenseTotal = useMemo(() => {
+    const profCatIds = new Set(professionalCategories.map((c: any) => c.id))
+    return [...expenseItems, ...savingItems]
+      .filter((i: any) => i.budget_category_id && profCatIds.has(i.budget_category_id))
+      .reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
+  }, [expenseItems, savingItems, professionalCategories])
+
   const saldoDisponibile = incomeTotal - expenseTotal
   const risparmioLibero = saldoDisponibile - savingTotal
 
@@ -557,9 +658,9 @@ export default function BudgetPage() {
     if (!profile?.family_id || !catForm.name.trim()) return
     setSaving(true)
     if (catModal?.mode === 'edit' && catModal.cat) {
-      await updateBudgetCategory(catModal.cat.id, { name: catForm.name.trim(), icon: catForm.icon, color: catForm.color })
+      await updateBudgetCategory(catModal.cat.id, { name: catForm.name.trim(), icon: catForm.icon, color: catForm.color, budget_type: catForm.budget_type })
     } else {
-      await addBudgetCategory({ family_id: profile.family_id, name: catForm.name.trim(), icon: catForm.icon, color: catForm.color, sort_order: budgetCategories.length, is_default: false })
+      await addBudgetCategory({ family_id: profile.family_id, name: catForm.name.trim(), icon: catForm.icon, color: catForm.color, budget_type: catForm.budget_type, sort_order: budgetCategories.length, is_default: false })
     }
     await loadBudgetCategories(profile.family_id)
     setSaving(false); setCatModal(null)
@@ -634,79 +735,67 @@ export default function BudgetPage() {
             }
           </div>
 
-          {/* B - SPESE */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-gray-700 flex items-center gap-2 text-sm">
-                <span className="text-base">💸</span> B · Spese
-                <span className="text-gray-500 font-normal">{formatCurrency(expenseTotal + savingTotal)}</span>
-              </h2>
-              <button onClick={() => { setCatForm({ name: '', icon: '📦', color: '#6366f1' }); setCatModal({ mode: 'add' }) }}
-                className="text-xs text-gray-500 border px-2.5 py-1.5 rounded-lg hover:bg-gray-50 flex items-center gap-1">
-                <Plus className="h-3 w-3" /> Macrovoce
-              </button>
-            </div>
-            {budgetCategories.length === 0 && (
-              <div className="bg-white rounded-xl border shadow-sm text-center py-8 text-gray-400 text-sm">
-                Nessuna macrovoce. Clicca "+ Macrovoce" per aggiungerne una.
-              </div>
-            )}
-            {budgetCategories.map((cat: any) => {
-              const catItems = [...expenseItems.filter((i: any) => i.budget_category_id === cat.id), ...savingItems.filter((i: any) => i.budget_category_id === cat.id)]
-              const catTotal = catItems.reduce((s: number, i: any) => s + getAnnualAmount(i), 0)
-              const isOpen = expanded[cat.id] !== false
-              return (
-                <div key={cat.id} className="bg-white rounded-xl border shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b cursor-pointer hover:bg-gray-50"
-                    style={{ borderLeftWidth: 3, borderLeftColor: cat.color || '#6366f1' }}
-                    onClick={() => setExpanded(e => ({ ...e, [cat.id]: !isOpen }))}>
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <span>{cat.icon || '📦'}</span>
-                      <span className="font-medium text-gray-800 text-sm truncate">{cat.name}</span>
-                      <span className="text-xs text-gray-400">{formatCurrency(catTotal)}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={e => { e.stopPropagation(); setCatForm({ name: cat.name, icon: cat.icon || '📦', color: cat.color || '#6366f1' }); setCatModal({ mode: 'edit', cat }) }}
-                        className="p-1 text-gray-300 hover:text-gray-600"><Edit2 className="h-3.5 w-3.5" /></button>
-                      <button onClick={e => { e.stopPropagation(); handleDeleteCat(cat.id) }}
-                        className="p-1 text-gray-300 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
-                      {isOpen ? <ChevronUp className="h-4 w-4 text-gray-300" /> : <ChevronDown className="h-4 w-4 text-gray-300" />}
-                    </div>
-                  </div>
-                  {isOpen && (
-                    <>
-                      {catItems.length === 0
-                        ? <div className="py-4 text-center text-sm text-gray-400">Nessuna voce</div>
-                        : <div className="divide-y">{catItems.map((item: any) => <ItemRow key={item.id} item={item} onEdit={() => openEditItem(item)} onDelete={() => handleDeleteItem(item.id)} />)}</div>
-                      }
-                      <div className="px-4 py-2 border-t bg-gray-50 flex gap-3">
-                        <button onClick={() => openAddItem('expense', cat.id)} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                          <Plus className="h-3 w-3" /> Spesa
-                        </button>
-                        <span className="text-gray-300">·</span>
-                        <button onClick={() => openAddItem('saving_goal', cat.id)} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                          <Plus className="h-3 w-3" /> Obiettivo risparmio
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+          {/* B - SPESE FAMILIARI */}
+          <BudgetCategorySection
+            label="B"
+            title="Spese Familiari"
+            icon="🏠"
+            total={familyExpenseTotal}
+            categories={familyCategories}
+            expenseItems={expenseItems}
+            savingItems={savingItems}
+            expanded={expanded}
+            setExpanded={setExpanded}
+            onAddItem={openAddItem}
+            onEditItem={openEditItem}
+            onDeleteItem={handleDeleteItem}
+            onAddCategory={() => { setCatForm({ name: '', icon: '📦', color: '#6366f1', budget_type: 'familiare' }); setCatModal({ mode: 'add' }) }}
+            onEditCategory={(cat) => { setCatForm({ name: cat.name, icon: cat.icon || '📦', color: cat.color || '#6366f1', budget_type: cat.budget_type || 'familiare' }); setCatModal({ mode: 'edit', cat }) }}
+            onDeleteCategory={handleDeleteCat}
+            emptyLabel="Nessuna macrovoce familiare."
+          />
 
-          {/* C - RIEPILOGO */}
+          {/* C - SPESE PROFESSIONALI */}
+          <BudgetCategorySection
+            label="C"
+            title="Spese Professionali"
+            icon="💼"
+            total={professionalExpenseTotal}
+            categories={professionalCategories}
+            expenseItems={expenseItems}
+            savingItems={savingItems}
+            expanded={expanded}
+            setExpanded={setExpanded}
+            onAddItem={openAddItem}
+            onEditItem={openEditItem}
+            onDeleteItem={handleDeleteItem}
+            onAddCategory={() => { setCatForm({ name: '', icon: '💼', color: '#0891b2', budget_type: 'professionale' }); setCatModal({ mode: 'add' }) }}
+            onEditCategory={(cat) => { setCatForm({ name: cat.name, icon: cat.icon || '💼', color: cat.color || '#0891b2', budget_type: 'professionale' }); setCatModal({ mode: 'edit', cat }) }}
+            onDeleteCategory={handleDeleteCat}
+            emptyLabel="Nessuna macrovoce professionale."
+            accentColor="#0891b2"
+          />
+
+          {/* D - RIEPILOGO */}
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-100 shadow-sm p-5">
-            <h2 className="font-semibold text-gray-700 mb-4 text-sm flex items-center gap-2"><span>📊</span> C · Riepilogo {viewYear}</h2>
+            <h2 className="font-semibold text-gray-700 mb-4 text-sm flex items-center gap-2"><span>📊</span> D · Riepilogo {viewYear}</h2>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-600">Totale entrate previste</span>
                 <span className="font-semibold text-green-600">+{formatCurrency(incomeTotal)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Totale spese previste</span>
-                <span className="font-semibold text-red-500">−{formatCurrency(expenseTotal)}</span>
-              </div>
+              {familyExpenseTotal > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">🏠 Spese familiari</span>
+                  <span className="font-semibold text-red-500">−{formatCurrency(familyExpenseTotal)}</span>
+                </div>
+              )}
+              {professionalExpenseTotal > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">💼 Spese professionali</span>
+                  <span className="font-semibold text-orange-500">−{formatCurrency(professionalExpenseTotal)}</span>
+                </div>
+              )}
               <div className="h-px bg-blue-200 my-1" />
               <div className="flex justify-between font-bold text-base">
                 <span className="text-gray-800">Saldo disponibile</span>
@@ -1602,10 +1691,25 @@ export default function BudgetPage() {
             </div>
             <div className="space-y-3">
               <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Tipo</label>
+                <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+                  <button type="button"
+                    onClick={() => setCatForm(f => ({ ...f, budget_type: 'familiare' }))}
+                    className={`flex-1 py-1.5 rounded-md transition-colors ${catForm.budget_type === 'familiare' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>
+                    🏠 Familiare
+                  </button>
+                  <button type="button"
+                    onClick={() => setCatForm(f => ({ ...f, budget_type: 'professionale' }))}
+                    className={`flex-1 py-1.5 rounded-md transition-colors ${catForm.budget_type === 'professionale' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>
+                    💼 Professionale
+                  </button>
+                </div>
+              </div>
+              <div>
                 <label className="text-xs font-medium text-gray-700 block mb-1">Nome *</label>
                 <input value={catForm.name} onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  placeholder="es. Casa, Auto..." autoFocus />
+                  placeholder="es. Casa, Utenze, Consulenze..." autoFocus />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
