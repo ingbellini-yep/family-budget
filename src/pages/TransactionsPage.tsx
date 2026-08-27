@@ -54,6 +54,7 @@ export default function TransactionsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectionDeleting, setSelectionDeleting] = useState(false)
   const [selectionDeleteConfirm, setSelectionDeleteConfirm] = useState(false)
+  const [selectionDeleteError, setSelectionDeleteError] = useState('')
 
   // ── Bulk delete (by filter/date/account/all) ─────────────────────────────────
   const [showBulkModal, setShowBulkModal] = useState(false)
@@ -211,10 +212,15 @@ export default function TransactionsPage() {
   const handleSelectionDelete = async () => {
     if (!someSelected) return
     setSelectionDeleting(true)
-    await bulkDeleteByIds([...selectedIds])
+    setSelectionDeleteError('')
+    const { error } = await bulkDeleteByIds([...selectedIds])
     setSelectionDeleting(false)
-    setSelectionDeleteConfirm(false)
-    setSelectedIds(new Set())
+    if (error) {
+      setSelectionDeleteError(error.message || 'Errore durante l\'eliminazione')
+    } else {
+      setSelectionDeleteConfirm(false)
+      setSelectedIds(new Set())
+    }
   }
 
   const handleOpenBulkUpdate = (scope: 'selected' | 'filtered') => {
@@ -540,7 +546,11 @@ export default function TransactionsPage() {
 
       {/* ── Selection action bar ─────────────────────────────────────────────── */}
       {someSelected && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2.5 bg-primary/5 border border-primary/20 rounded-xl">
+        <div className="mb-3 space-y-1">
+        {selectionDeleteError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{selectionDeleteError}</p>
+        )}
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-primary/5 border border-primary/20 rounded-xl">
           <CheckSquare className="h-4 w-4 text-primary flex-shrink-0" />
           <span className="text-sm font-medium text-primary">{selectedIds.size} selezionate</span>
           <div className="flex items-center gap-2 ml-auto">
@@ -575,11 +585,12 @@ export default function TransactionsPage() {
                 </button>
               </div>
             )}
-            <button onClick={clearSelection}
+            <button onClick={() => { clearSelection(); setSelectionDeleteError('') }}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded">
               <X className="h-4 w-4" />
             </button>
           </div>
+        </div>
         </div>
       )}
 

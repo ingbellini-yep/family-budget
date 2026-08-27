@@ -202,8 +202,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     else if (dateFrom && dateTo) query = query.gte('date', dateFrom).lte('date', dateTo)
     const { error } = await query
     if (!error) {
-      const { selectedYear, selectedMonth } = get()
-      await get().loadTransactions(familyId, selectedYear, selectedMonth)
+      await get().reloadTransactions(familyId)
     }
     return { error }
   },
