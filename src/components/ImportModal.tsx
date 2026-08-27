@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { X, FileText, Image, Table2, Trash2, Check, AlertTriangle, Loader2, Sparkles, ChevronRight, ChevronLeft, Building2 } from 'lucide-react'
-import { extractTransactionsFromImage, extractTransactionsFromPageImage, detectBank, suggestCategory, getStoredApiKey, ExtractedTransaction } from '../lib/claudeAI'
+import { extractTransactionsFromImage, extractTransactionsFromPageImage, detectBank, suggestCategory, suggestMacroCategory, getStoredApiKey, ExtractedTransaction } from '../lib/claudeAI'
 import { parseIntesaXlsx, matchIntesaCategory } from '../lib/parseIntesaXlsx'
 import { parseBperXls, matchBperBudgetCategory } from '../lib/parseBperXls'
 
@@ -360,19 +360,34 @@ export default function ImportModal({
     setCsvStep(3)
   }, [csvMapping, csvHeaders, csvRawRows, transactions, defaultAccountId])
 
-  // ── Suggest categories for all rows ──────────────────────────────────────
+  // ── Macrocategoria "A- Entrate" per le entrate ───────────────────────────
+  const incomeMacroId = budgetCategories.find((bc: any) => bc.name.startsWith('A-'))?.id as string | undefined
+
+  // ── Auto-suggest macrocategorie appena arriva il preview ─────────────────
+  useEffect(() => {
+    if (step !== 'preview' || !rows.length) return
+    suggestAllCategories()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step])
+
+  // ── Suggest macrocategoria per tutte le righe ─────────────────────────────
   const suggestAllCategories = async () => {
-    if (!hasApiKey || !rows.length) return
-    setLoadingMsg('Suggerimento categorie...')
+    if (!rows.length) return
+    setLoadingMsg('Assegnazione macrocategorie...')
     setLoading(true)
     const updated = [...rows]
     for (let i = 0; i < updated.length; i++) {
-      if (!updated[i].include || updated[i].category_id) continue
-      const { categoryId, budgetCategoryId } = await suggestCategory(
-        updated[i].description, categories, budgetCategories, apiKey,
-      ).catch(() => ({ categoryId: null, budgetCategoryId: null }))
-      if (categoryId) updated[i] = { ...updated[i], category_id: categoryId }
-      if (budgetCategoryId) updated[i] = { ...updated[i], budget_category_id: budgetCategoryId }
+      if (!updated[i].include || updated[i].budget_category_id) continue
+      if (updated[i].type === 'entrata') {
+        // Entrate → macrocategoria "A- Entrate" in automatico
+        if (incomeMacroId) updated[i] = { ...updated[i], budget_category_id: incomeMacroId }
+      } else if (hasApiKey) {
+        // Uscite → AI suggerisce solo la macrocategoria
+        const budgetCategoryId = await suggestMacroCategory(
+          updated[i].description, budgetCategories, apiKey,
+        ).catch(() => null)
+        if (budgetCategoryId) updated[i] = { ...updated[i], budget_category_id: budgetCategoryId }
+      }
       setRows([...updated])
     }
     setLoading(false)
@@ -692,16 +707,14 @@ export default function ImportModal({
                 <span className="px-2 py-1 bg-green-50 text-green-700 rounded-full font-medium">{includedCount} da importare</span>
                 {dupCount > 0 && <span className="px-2 py-1 bg-yellow-50 text-yellow-700 rounded-full">{dupCount} possibili duplicati</span>}
                 {errCount > 0 && <span className="px-2 py-1 bg-red-50 text-red-700 rounded-full">{errCount} errori</span>}
-                {hasApiKey && (
-                  <button
-                    onClick={suggestAllCategories}
-                    disabled={loading}
-                    className="px-2 py-1 bg-purple-50 text-purple-700 rounded-full flex items-center gap-1 hover:bg-purple-100"
-                  >
-                    <Sparkles className="h-3 w-3" />
-                    Suggerisci macro categoria AI
-                  </button>
-                )}
+                <button
+                  onClick={suggestAllCategories}
+                  disabled={loading}
+                  className="px-2 py-1 bg-purple-50 text-purple-700 rounded-full flex items-center gap-1 hover:bg-purple-100"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {loading ? 'Assegnando...' : 'Ri-assegna macrocategorie'}
+                </button>
                 <div className="flex items-center gap-1.5 ml-auto">
                   <span className="text-gray-500">Conto:</span>
                   <select

@@ -130,7 +130,41 @@ Ignora intestazioni, totali e testo non transazionale. Converti date italiane in
 
 export { detectBank }
 
-// ─── 9.4 Suggerimento categoria ───────────────────────────────────────────────
+// ─── 9.4 Suggerimento macrocategoria (solo budget_category) ──────────────────
+export async function suggestMacroCategory(
+  description: string,
+  budgetCategories: Array<{ id: string; name: string; budget_type?: string }>,
+  apiKey: string,
+): Promise<string | null> {
+  if (!description.trim() || !apiKey) return null
+  // Only offer uscita macrocategories (exclude "A- Entrate" type)
+  const speseCats = budgetCategories.filter(c => !c.name.startsWith('A-'))
+  const bcList = speseCats.map(c => c.name).join(', ')
+  if (!bcList) return null
+
+  const res = await fetch(CLAUDE_API_URL, {
+    method: 'POST',
+    headers: CLAUDE_HEADERS(apiKey),
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 64,
+      messages: [{
+        role: 'user',
+        content: `Descrizione transazione bancaria italiana: "${description}"
+Macrocategorie disponibili: ${bcList}
+Scegli la macrocategoria più adatta. Rispondi SOLO con il nome esatto, senza altro testo.`,
+      }],
+    }),
+  })
+  if (!res.ok) return null
+  const data = await res.json()
+  const text: string = (data.content?.[0]?.text || '').trim()
+  const match = speseCats.find(c => c.name.toLowerCase() === text.toLowerCase())
+    || speseCats.find(c => text.toLowerCase().includes(c.name.toLowerCase()))
+  return match?.id || null
+}
+
+// ─── 9.4b Suggerimento categoria (legacy, mantiene backward compat) ───────────
 export async function suggestCategory(
   description: string,
   categories: Array<{ id: string; name: string; type: string }>,
