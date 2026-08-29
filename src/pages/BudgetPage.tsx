@@ -490,10 +490,11 @@ export default function BudgetPage() {
     }
   }, [expenseItems, savingItems, accounts, yearTransactions, chartsView])
 
-  // Pie 2: spese per macro categoria
-  const pieDataByMacro = useMemo(() => {
+  // Pie 2a/2b: spese per macro categoria — familiari e professionali separati
+  const makePieDataByMacro = (typeFilter: string) => {
+    const filteredCats = budgetCategories.filter((c: any) => c.budget_type === typeFilter)
     if (chartsView === 'preventivo') {
-      return budgetCategories
+      return filteredCats
         .map((cat: any) => {
           const total = [...expenseItems, ...savingItems]
             .filter((i: any) => i.budget_category_id === cat.id)
@@ -505,18 +506,23 @@ export default function BudgetPage() {
     } else {
       const txMap: Record<string, string> = {}
       categoryBudgetMappings.forEach((m: any) => { txMap[m.transaction_category_id] = m.budget_category_id })
+      const catIds = new Set(filteredCats.map((c: any) => c.id))
       const map: Record<string, { name: string; value: number; color: string }> = {}
       yearTransactions.filter((tx: any) => tx.type === 'uscita').forEach((tx: any) => {
         const bcId = tx.budget_category_id || txMap[tx.category_id]
-        if (!bcId) return
-        const cat = budgetCategories.find((c: any) => c.id === bcId)
+        if (!bcId || !catIds.has(bcId)) return
+        const cat = filteredCats.find((c: any) => c.id === bcId)
         if (!cat) return
         if (!map[bcId]) map[bcId] = { name: `${cat.icon || ''} ${cat.name}`, value: 0, color: cat.color || '#6366f1' }
         map[bcId].value += Number(tx.amount)
       })
       return Object.values(map).map(d => ({ ...d, value: Math.round(d.value) })).sort((a, b) => b.value - a.value)
     }
-  }, [expenseItems, savingItems, budgetCategories, yearTransactions, categoryBudgetMappings, chartsView])
+  }
+  const pieDataByMacroFamily = useMemo(() => makePieDataByMacro('familiare'),
+    [expenseItems, savingItems, budgetCategories, yearTransactions, categoryBudgetMappings, chartsView])
+  const pieDataByMacroPro = useMemo(() => makePieDataByMacro('professionale'),
+    [expenseItems, savingItems, budgetCategories, yearTransactions, categoryBudgetMappings, chartsView])
 
   // Chart 3: dati per stacked bar (voci per macro categoria)
   const stackedBarData = useMemo(() =>
@@ -821,7 +827,7 @@ export default function BudgetPage() {
             <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b bg-slate-50">
                 <span className="text-base">🏦</span>
-                <h2 className="font-semibold text-slate-800 text-sm">C2 · Fabbisogno per Conto {viewYear}</h2>
+                <h2 className="font-semibold text-slate-800 text-sm">D1 · Fabbisogno per Conto {viewYear}</h2>
                 <span className="ml-auto text-xs text-slate-400">Saldo preventivato per ogni conto</span>
               </div>
               <div className="divide-y">
@@ -896,7 +902,7 @@ export default function BudgetPage() {
             <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b bg-emerald-50">
                 <span className="text-base">🪣</span>
-                <h2 className="font-semibold text-emerald-800 text-sm">C3 · Distribuzione Residuo {viewYear}</h2>
+                <h2 className="font-semibold text-emerald-800 text-sm">D2 · Distribuzione Residuo {viewYear}</h2>
                 <span className="ml-2 text-sm font-semibold text-emerald-700">{formatCurrency(Math.max(risparmioLibero, 0))}</span>
                 <span className="text-xs text-emerald-500">disponibile</span>
                 <button
@@ -999,8 +1005,8 @@ export default function BudgetPage() {
                 </div>
               </div>
 
-              {/* Riga 1: due torte affiancate */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Riga 1: tre torte affiancate */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Torta 1 — per conto */}
                 <div className="bg-white rounded-xl border shadow-sm p-4">
                   <h3 className="text-xs font-semibold text-gray-600 mb-3">
@@ -1038,28 +1044,65 @@ export default function BudgetPage() {
                   )}
                 </div>
 
-                {/* Torta 2 — per macro categoria */}
+                {/* Torta 2 — spese familiari per macro */}
                 <div className="bg-white rounded-xl border shadow-sm p-4">
                   <h3 className="text-xs font-semibold text-gray-600 mb-3">
-                    🏷️ Spese per macro categoria — {chartsView === 'preventivo' ? 'Preventivo' : `Consuntivo ${MONTHS_IT[0]}–${MONTHS_IT[curMonth]}`}
+                    🏠 Spese familiari per macro — {chartsView === 'preventivo' ? 'Preventivo' : `Consuntivo ${MONTHS_IT[0]}–${MONTHS_IT[curMonth]}`}
                   </h3>
-                  {pieDataByMacro.length === 0 ? (
+                  {pieDataByMacroFamily.length === 0 ? (
                     <div className="h-40 flex items-center justify-center text-xs text-gray-400">
-                      {chartsView === 'preventivo' ? 'Nessuna voce di spesa' : 'Nessuna transazione con macro categoria'}
+                      {chartsView === 'preventivo' ? 'Nessuna voce familiare' : 'Nessuna transazione familiare'}
                     </div>
                   ) : (
                     <>
                       <ResponsiveContainer width="100%" height={180}>
                         <PieChart>
-                          <Pie data={pieDataByMacro} dataKey="value" cx="50%" cy="50%" outerRadius={70} labelLine={false}>
-                            {pieDataByMacro.map((entry, index) => <Cell key={`c2-${index}`} fill={entry.color} />)}
+                          <Pie data={pieDataByMacroFamily} dataKey="value" cx="50%" cy="50%" outerRadius={70} labelLine={false}>
+                            {pieDataByMacroFamily.map((entry, index) => <Cell key={`c2f-${index}`} fill={entry.color} />)}
                           </Pie>
                           <Tooltip formatter={(v: number) => formatCurrency(v)} />
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="space-y-1 mt-2">
-                        {pieDataByMacro.map((d, i) => {
-                          const total = pieDataByMacro.reduce((s, x) => s + x.value, 0)
+                        {pieDataByMacroFamily.map((d, i) => {
+                          const total = pieDataByMacroFamily.reduce((s, x) => s + x.value, 0)
+                          const pct = total > 0 ? Math.round((d.value / total) * 100) : 0
+                          return (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                              <span className="flex-1 truncate text-gray-600">{d.name}</span>
+                              <span className="text-gray-400">{pct}%</span>
+                              <span className="font-medium text-gray-700">{formatCurrency(d.value)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Torta 3 — spese professionali per macro */}
+                <div className="bg-white rounded-xl border shadow-sm p-4">
+                  <h3 className="text-xs font-semibold text-gray-600 mb-3">
+                    💼 Spese professionali per macro — {chartsView === 'preventivo' ? 'Preventivo' : `Consuntivo ${MONTHS_IT[0]}–${MONTHS_IT[curMonth]}`}
+                  </h3>
+                  {pieDataByMacroPro.length === 0 ? (
+                    <div className="h-40 flex items-center justify-center text-xs text-gray-400">
+                      {chartsView === 'preventivo' ? 'Nessuna voce professionale' : 'Nessuna transazione professionale'}
+                    </div>
+                  ) : (
+                    <>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <PieChart>
+                          <Pie data={pieDataByMacroPro} dataKey="value" cx="50%" cy="50%" outerRadius={70} labelLine={false}>
+                            {pieDataByMacroPro.map((entry, index) => <Cell key={`c2p-${index}`} fill={entry.color} />)}
+                          </Pie>
+                          <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="space-y-1 mt-2">
+                        {pieDataByMacroPro.map((d, i) => {
+                          const total = pieDataByMacroPro.reduce((s, x) => s + x.value, 0)
                           const pct = total > 0 ? Math.round((d.value / total) * 100) : 0
                           return (
                             <div key={i} className="flex items-center gap-2 text-xs">
