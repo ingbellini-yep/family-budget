@@ -85,7 +85,6 @@ export default function TransactionsPage() {
   const [suggestingCategory, setSuggestingCategory] = useState(false)
   const [learnToast, setLearnToast] = useState('')
   const [showDashboard, setShowDashboard] = useState(false)
-  const [formBudgetType, setFormBudgetType] = useState<'familiare' | 'professionale'>('familiare')
 
   const form = useForm<TxForm>({
     resolver: zodResolver(txSchema),
@@ -159,21 +158,22 @@ export default function TransactionsPage() {
       description: '', amount: undefined as any, budget_category_id: '',
       category_id: '', account_id: '', note: '',
     })
-    setFormBudgetType('familiare')
     setShowModal(true)
   }
 
   const handleOpenEdit = (tx: any) => {
     setEditingTx(tx)
     setShowNewCatInput(false); setNewCatName('')
+    // For income transactions, auto-assign A-Entrate if not already set
+    const incomeId = budgetCategories.find((bc: any) => bc.budget_type === 'entrata')?.id
+    const budgetCatId = tx.budget_category_id
+      || (tx.type === 'entrata' && incomeId ? incomeId : '')
     form.reset({
       date: tx.date, type: tx.type, description: tx.description, amount: tx.amount,
-      budget_category_id: tx.budget_category_id || '',
+      budget_category_id: budgetCatId,
       category_id: tx.category_id || '', account_id: tx.account_id || '',
       note: tx.note || '',
     })
-    const existingBc = budgetCategories.find((bc: any) => bc.id === tx.budget_category_id)
-    setFormBudgetType(existingBc?.budget_type === 'professionale' ? 'professionale' : 'familiare')
     setShowModal(true)
   }
 
@@ -290,7 +290,13 @@ export default function TransactionsPage() {
   const watchType = form.watch('type')
   const watchCategoryId = form.watch('category_id')
   const watchDescription = form.watch('description')
-  const filteredCategories = categories.filter(c => c.type === watchType || c.type === 'risparmio')
+  const watchBudgetCategoryId = form.watch('budget_category_id')
+  const incomeMacro = budgetCategories.find((bc: any) => bc.budget_type === 'entrata')
+
+  // Subcategories filtered by selected macrocategory
+  const filteredCategories = watchBudgetCategoryId
+    ? categories.filter((c: any) => c.budget_category_id === watchBudgetCategoryId)
+    : []
   const bulkUpdateFilteredCategories = categories.filter(c =>
     !bulkUpdateType || c.type === bulkUpdateType || c.type === 'risparmio')
 
@@ -302,6 +308,7 @@ export default function TransactionsPage() {
       name: newCatName.trim(),
       type: watchType,
       color: '#94a3b8',
+      budget_category_id: watchBudgetCategoryId || null,
     })
     setAddingCat(false)
     if (!error && data) {
@@ -368,11 +375,7 @@ export default function TransactionsPage() {
     }).sort((a, b) => b.Effettivo - a.Effettivo).slice(0, 8)
   }, [filtered, budgetCategories, budgetItems])
 
-  const isIncomeMacro = (bc: any) => bc.name.startsWith('A-')
-  const filteredBudgetCategories = budgetCategories.filter((bc: any) => {
-    if (watchType === 'entrata') return isIncomeMacro(bc)
-    return bc.budget_type === formBudgetType && !isIncomeMacro(bc)
-  })
+  const isIncomeMacro = (bc: any) => bc.budget_type === 'entrata'
 
   return (
     <div className="p-4 md:p-6 pb-28 md:pb-6">
@@ -708,11 +711,19 @@ export default function TransactionsPage() {
             </div>
             <form onSubmit={form.handleSubmit(handleSubmit)} className="p-4 space-y-4">
               <div className="flex rounded-lg bg-gray-100 p-1">
-                <button type="button" onClick={() => form.setValue('type', 'uscita')}
+                <button type="button" onClick={() => {
+                  form.setValue('type', 'uscita')
+                  form.setValue('budget_category_id', '')
+                  form.setValue('category_id', '')
+                }}
                   className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${watchType === 'uscita' ? 'bg-red-500 text-white' : 'text-gray-500'}`}>
                   Uscita
                 </button>
-                <button type="button" onClick={() => form.setValue('type', 'entrata')}
+                <button type="button" onClick={() => {
+                  form.setValue('type', 'entrata')
+                  form.setValue('budget_category_id', incomeMacro?.id || '')
+                  form.setValue('category_id', '')
+                }}
                   className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${watchType === 'entrata' ? 'bg-green-500 text-white' : 'text-gray-500'}`}>
                   Entrata
                 </button>
@@ -749,44 +760,35 @@ export default function TransactionsPage() {
                   placeholder="es. Supermercato Esselunga" />
                 {form.formState.errors.description && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.description.message}</p>}
               </div>
-              {/* Familiare / Professionale toggle — solo per uscite */}
-              {watchType === 'uscita' && (
-                <div>
-                  <label className="text-xs font-semibold text-gray-800 block mb-1">
-                    Tipo spesa <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
-                    <button type="button"
-                      onClick={() => { setFormBudgetType('familiare'); form.setValue('budget_category_id', '') }}
-                      className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'familiare' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-                      🏠 Familiare
-                    </button>
-                    <button type="button"
-                      onClick={() => { setFormBudgetType('professionale'); form.setValue('budget_category_id', '') }}
-                      className={`flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 ${formBudgetType === 'professionale' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-                      💼 Professionale
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {/* Macro categoria — obbligatoria */}
               <div>
                 <label className="text-xs font-semibold text-gray-800">
-                  Macro categoria <span className="text-red-500">*</span>
+                  Macrocategoria <span className="text-red-500">*</span>
                 </label>
-                {filteredBudgetCategories.length === 0 ? (
-                  <p className="mt-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    {watchType === 'entrata'
-                      ? 'Nessuna macrocategoria entrate trovata. Aggiungine una in Budget.'
-                      : `Nessuna macrocategoria ${formBudgetType === 'professionale' ? 'professionale' : 'familiare'} trovata.${formBudgetType === 'professionale' ? ' Creane una in Budget → sezione C.' : ''}`}
-                  </p>
+                {watchType === 'entrata' ? (
+                  <div className="mt-1 w-full border-2 border-green-300 bg-green-50 rounded-lg px-3 py-2 text-sm text-green-800 font-medium">
+                    💰 A - Entrate
+                  </div>
                 ) : (
-                  <select {...form.register('budget_category_id')} className="mt-1 w-full border-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white">
-                    <option value="">— Seleziona —</option>
-                    {filteredBudgetCategories.map((bc: any) => (
-                      <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
-                    ))}
+                  <select
+                    {...form.register('budget_category_id', {
+                      onChange: () => form.setValue('category_id', ''),
+                    })}
+                    className="mt-1 w-full border-2 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-white"
+                  >
+                    <option value="">— Seleziona macrocategoria —</option>
+                    {(['familiare', 'professionale'] as const).map(btype => {
+                      const macros = budgetCategories.filter((bc: any) => bc.budget_type === btype)
+                      if (!macros.length) return null
+                      const label = btype === 'familiare' ? 'B - Spese Familiari' : 'C - Spese Professionali'
+                      return (
+                        <optgroup key={btype} label={label}>
+                          {macros.map((bc: any) => (
+                            <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
+                          ))}
+                        </optgroup>
+                      )
+                    })}
                   </select>
                 )}
                 {form.formState.errors.budget_category_id && (
@@ -799,17 +801,20 @@ export default function TransactionsPage() {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-medium text-gray-700">
-                      Categoria <span className="text-gray-400 font-normal">(opzionale)</span>
+                      Categoria
                     </label>
-                    <button type="button" onClick={() => { setShowNewCatInput(v => !v); setNewCatName('') }}
-                      className="text-[10px] text-primary hover:underline">
-                      {showNewCatInput ? 'Annulla' : '+ Nuova'}
-                    </button>
+                    {watchBudgetCategoryId && (
+                      <button type="button" onClick={() => { setShowNewCatInput(v => !v); setNewCatName('') }}
+                        className="text-[10px] text-primary hover:underline">
+                        {showNewCatInput ? 'Annulla' : '+ Nuova'}
+                      </button>
+                    )}
                   </div>
                   {!showNewCatInput ? (
-                    <select {...form.register('category_id')} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
-                      <option value="">— Nessuna —</option>
-                      {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    <select {...form.register('category_id')} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                      disabled={!watchBudgetCategoryId}>
+                      <option value="">{watchBudgetCategoryId ? '— Seleziona —' : '— Prima seleziona una macrocategoria —'}</option>
+                      {filteredCategories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   ) : (
                     <div className="flex gap-1">

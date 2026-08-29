@@ -49,7 +49,7 @@ interface AppState {
   addBudgetCategory: (cat: any) => Promise<{ error: any; data?: any }>
   updateBudgetCategory: (id: string, updates: any) => Promise<{ error: any }>
   deleteBudgetCategory: (id: string) => Promise<{ error: any }>
-  addCategory: (cat: { family_id: string; name: string; type: 'entrata' | 'uscita' | 'risparmio'; color?: string }) => Promise<{ error: any; data?: any }>
+  addCategory: (cat: { family_id: string; name: string; type: 'entrata' | 'uscita' | 'risparmio'; color?: string; budget_category_id?: string | null }) => Promise<{ error: any; data?: any }>
   saveCategoryBudgetMapping: (familyId: string, txCategoryId: string, budgetCategoryId: string | null) => Promise<{ error: any }>
   // Description → macrocategory learned mappings
   descriptionMacroMappings: Record<string, string>  // normalizedDesc → budgetCategoryId

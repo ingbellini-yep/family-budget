@@ -138,7 +138,7 @@ export async function suggestMacroCategory(
 ): Promise<string | null> {
   if (!description.trim() || !apiKey) return null
   // Only offer uscita macrocategories (exclude "A- Entrate" type)
-  const speseCats = budgetCategories.filter(c => !c.name.startsWith('A-'))
+  const speseCats = budgetCategories.filter(c => c.budget_type !== 'entrata')
   const bcList = speseCats.map(c => c.name).join(', ')
   if (!bcList) return null
 

@@ -366,7 +366,7 @@ export default function ImportModal({
   }, [csvMapping, csvHeaders, csvRawRows, transactions, defaultAccountId])
 
   // ── Macrocategoria "A- Entrate" per le entrate ───────────────────────────
-  const incomeMacroId = budgetCategories.find((bc: any) => bc.name.startsWith('A-'))?.id as string | undefined
+  const incomeMacroId = budgetCategories.find((bc: any) => bc.budget_type === 'entrata')?.id as string | undefined
 
   // ── Auto-suggest macrocategorie appena arriva il preview ─────────────────
   useEffect(() => {
@@ -857,9 +857,14 @@ export default function ImportModal({
                             value={row.category_id}
                             onChange={e => setRows(rs => rs.map(r => r._id === row._id ? { ...r, category_id: e.target.value } : r))}
                             className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[120px]"
+                            disabled={!row.budget_category_id}
                           >
                             <option value="">— —</option>
-                            {categories.filter(c => c.type === row.type || c.type === 'risparmio').map(c => (
+                            {categories
+                              .filter((c: any) => row.budget_category_id
+                                ? c.budget_category_id === row.budget_category_id
+                                : c.type === row.type)
+                              .map((c: any) => (
                               <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                           </select>
@@ -883,8 +888,8 @@ export default function ImportModal({
                             <option value="">— —</option>
                             {budgetCategories
                               .filter((bc: any) => row.type === 'entrata'
-                                ? bc.name.startsWith('A-')
-                                : !bc.name.startsWith('A-'))
+                                ? bc.budget_type === 'entrata'
+                                : bc.budget_type !== 'entrata')
                               .map((bc: any) => (
                                 <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>
                               ))}
