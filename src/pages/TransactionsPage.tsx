@@ -957,6 +957,7 @@ export default function TransactionsPage() {
         accounts={accounts}
         categories={categories}
         budgetCategories={budgetCategories}
+        budgetItems={budgetItems}
         transactions={transactions}
         addTransaction={addTransaction}
       />

@@ -15,6 +15,7 @@ interface PreviewRow {
   type: 'entrata' | 'uscita'
   category_id: string
   budget_category_id?: string
+  budget_item_id?: string
   account_id: string
   isDuplicate: boolean
   hasError: boolean
@@ -31,6 +32,7 @@ interface Props {
   accounts: any[]
   categories: any[]
   budgetCategories: any[]
+  budgetItems: any[]
   transactions: any[]
   addTransaction: (tx: any) => Promise<{ error: any }>
 }
@@ -95,7 +97,7 @@ function parseCsvText(text: string, sep: string): string[][] {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ImportModal({
   open, onClose, onImported,
-  profile, accounts, categories, budgetCategories, transactions, addTransaction,
+  profile, accounts, categories, budgetCategories, budgetItems, transactions, addTransaction,
 }: Props) {
   const [mode, setMode] = useState<Mode>('screenshot')
   const [rows, setRows] = useState<PreviewRow[]>([])
@@ -375,6 +377,24 @@ export default function ImportModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
 
+  // ── Auto-match budget_item from description ────────────────────────────────
+  const autoMatchBudgetItem = (description: string, budgetCategoryId: string | undefined, type: 'entrata' | 'uscita'): string | undefined => {
+    const candidates = budgetItems.filter((i: any) =>
+      type === 'entrata' ? i.type === 'income' : (i.budget_category_id === budgetCategoryId && i.type !== 'income'),
+    )
+    if (!candidates.length) return undefined
+    const descLower = description.toLowerCase()
+    // Exact match first
+    const exact = candidates.find((i: any) => descLower.includes(i.description.toLowerCase()))
+    if (exact) return exact.id
+    // Word match
+    for (const item of candidates) {
+      const words = item.description.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3)
+      if (words.some((w: string) => descLower.includes(w))) return item.id
+    }
+    return undefined
+  }
+
   // ── Suggest macrocategoria per tutte le righe ─────────────────────────────
   const suggestAllCategories = async () => {
     if (!rows.length) return
@@ -405,16 +425,26 @@ export default function ImportModal({
       }
       setRows([...updated])
     }
+
+    // Pass 3: auto-match budget_item_id for rows that have a budget_category_id
+    for (let i = 0; i < updated.length; i++) {
+      if (!updated[i].include || updated[i].budget_item_id) continue
+      const bcId = updated[i].budget_category_id
+      if (!bcId && updated[i].type !== 'entrata') continue
+      const itemId = autoMatchBudgetItem(updated[i].description, bcId, updated[i].type)
+      if (itemId) updated[i] = { ...updated[i], budget_item_id: itemId }
+    }
+    setRows([...updated])
     setLoading(false)
   }
 
   // ── Handle manual macrocategory correction ────────────────────────────────
   const handleMacroChange = async (rowId: string, description: string, newBcId: string | undefined) => {
     const key = normalizeDescriptionKey(description)
-    // Apply to ALL rows in preview with the same description key
+    // Apply to ALL rows in preview with the same description key; reset budget_item_id when macro changes
     setRows(rs => rs.map(r =>
       normalizeDescriptionKey(r.description) === key
-        ? { ...r, budget_category_id: newBcId }
+        ? { ...r, budget_category_id: newBcId, budget_item_id: undefined }
         : r,
     ))
     if (!newBcId || !profile?.family_id) return
@@ -443,19 +473,21 @@ export default function ImportModal({
     let firstError: string | null = null
     const source = mode === 'screenshot' ? 'screenshot' : mode === 'pdf' ? 'pdf' : mode === 'intesa' ? 'csv' : mode === 'bper' ? 'csv' : 'csv'
     for (const r of toSave) {
-      const categoryId = r.category_id
-        || categories.find(c => c.type === r.type)?.id
-        || categories.find(c => c.type === 'uscita')?.id
-        || categories[0]?.id
-        || null
+      // Derive budget_category_id from selected budget_item if available
+      let budgetCategoryId = r.budget_category_id || null
+      if (r.budget_item_id) {
+        const item = budgetItems.find((i: any) => i.id === r.budget_item_id)
+        if (item?.budget_category_id) budgetCategoryId = item.budget_category_id
+      }
       const { error } = await addTransaction({
         date: r.date,
         description: r.description,
         amount: r.amount,
         type: r.type,
-        category_id: categoryId,
+        category_id: null,
+        budget_item_id: r.budget_item_id || null,
         account_id: r.account_id || defaultAccountId,
-        budget_category_id: r.budget_category_id || null,
+        budget_category_id: budgetCategoryId,
         family_id: profile.family_id,
         created_by: profile.id,
         source,
@@ -794,7 +826,7 @@ export default function ImportModal({
                       <th className="px-2 py-2">Descrizione</th>
                       <th className="px-2 py-2 text-right">Importo</th>
                       <th className="px-2 py-2">Tipo</th>
-                      <th className="px-2 py-2">Categoria</th>
+                      <th className="px-2 py-2">Voce budget</th>
                       <th className="px-2 py-2">Macrocategoria</th>
                       <th className="px-2 py-2">Conto</th>
                       <th className="px-2 py-2 w-8"></th>
@@ -854,27 +886,27 @@ export default function ImportModal({
                         </td>
                         <td className="px-2 py-1.5">
                           <select
-                            value={row.category_id}
-                            onChange={e => setRows(rs => rs.map(r => r._id === row._id ? { ...r, category_id: e.target.value } : r))}
-                            className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[120px]"
-                            disabled={!row.budget_category_id}
+                            value={row.budget_item_id || ''}
+                            onChange={e => setRows(rs => rs.map(r => r._id === row._id ? { ...r, budget_item_id: e.target.value || undefined } : r))}
+                            className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[140px]"
+                            disabled={!row.budget_category_id && row.type !== 'entrata'}
                           >
                             <option value="">— —</option>
-                            {categories
-                              .filter((c: any) => row.budget_category_id
-                                ? c.budget_category_id === row.budget_category_id
-                                : c.type === row.type)
-                              .map((c: any) => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
+                            {budgetItems
+                              .filter((i: any) => row.type === 'entrata'
+                                ? i.type === 'income'
+                                : (i.budget_category_id === row.budget_category_id && i.type !== 'income'))
+                              .map((i: any) => (
+                                <option key={i.id} value={i.id}>{i.description}</option>
+                              ))}
                           </select>
-                          {row.intesaCategory && !row.category_id && (
-                            <p className="text-[10px] text-gray-400 mt-0.5 max-w-[120px] truncate" title={row.intesaCategory}>
+                          {row.intesaCategory && !row.budget_item_id && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 max-w-[140px] truncate" title={row.intesaCategory}>
                               ISP: {row.intesaCategory}
                             </p>
                           )}
-                          {row.bperCategory && !row.category_id && (
-                            <p className="text-[10px] text-gray-400 mt-0.5 max-w-[120px] truncate" title={row.bperCategory}>
+                          {row.bperCategory && !row.budget_item_id && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 max-w-[140px] truncate" title={row.bperCategory}>
                               BPER: {row.bperCategory}
                             </p>
                           )}
