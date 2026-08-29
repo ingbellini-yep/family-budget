@@ -3,6 +3,8 @@ import { X, FileText, Image, Table2, Trash2, Check, AlertTriangle, Loader2, Spar
 import { extractTransactionsFromImage, extractTransactionsFromPageImage, detectBank, suggestCategory, suggestMacroCategory, getStoredApiKey, ExtractedTransaction } from '../lib/claudeAI'
 import { parseIntesaXlsx, matchIntesaCategory } from '../lib/parseIntesaXlsx'
 import { parseBperXls, matchBperBudgetCategory } from '../lib/parseBperXls'
+import { normalizeDescriptionKey } from '../lib/utils'
+import { useAppStore } from '../store/appStore'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PreviewRow {
@@ -109,6 +111,9 @@ export default function ImportModal({
   const [csvRawRows, setCsvRawRows] = useState<string[][]>([])
   const [csvMapping, setCsvMapping] = useState({ date: '', description: '', amount: '', type: '', amountSign: 'auto' })
   const [csvSep, setCsvSep] = useState(',')
+
+  const { descriptionMacroMappings, saveDescriptionMacroMapping, applyMappingRetroactively } = useAppStore()
+  const [learnToast, setLearnToast] = useState('')
 
   const fileRef = useRef<HTMLInputElement>(null)
   const apiKey = getStoredApiKey()
@@ -376,13 +381,23 @@ export default function ImportModal({
     setLoadingMsg('Assegnazione macrocategorie...')
     setLoading(true)
     const updated = [...rows]
+
+    // Pass 1: apply learned mappings instantly (no API call)
+    for (let i = 0; i < updated.length; i++) {
+      if (!updated[i].include || updated[i].budget_category_id) continue
+      const key = normalizeDescriptionKey(updated[i].description)
+      if (descriptionMacroMappings[key]) {
+        updated[i] = { ...updated[i], budget_category_id: descriptionMacroMappings[key] }
+      }
+    }
+    setRows([...updated])
+
+    // Pass 2: for remaining rows, use rules (entrate) or AI (uscite)
     for (let i = 0; i < updated.length; i++) {
       if (!updated[i].include || updated[i].budget_category_id) continue
       if (updated[i].type === 'entrata') {
-        // Entrate → macrocategoria "A- Entrate" in automatico
         if (incomeMacroId) updated[i] = { ...updated[i], budget_category_id: incomeMacroId }
       } else if (hasApiKey) {
-        // Uscite → AI suggerisce solo la macrocategoria
         const budgetCategoryId = await suggestMacroCategory(
           updated[i].description, budgetCategories, apiKey,
         ).catch(() => null)
@@ -391,6 +406,32 @@ export default function ImportModal({
       setRows([...updated])
     }
     setLoading(false)
+  }
+
+  // ── Handle manual macrocategory correction ────────────────────────────────
+  const handleMacroChange = async (rowId: string, description: string, newBcId: string | undefined) => {
+    const key = normalizeDescriptionKey(description)
+    // Apply to ALL rows in preview with the same description key
+    setRows(rs => rs.map(r =>
+      normalizeDescriptionKey(r.description) === key
+        ? { ...r, budget_category_id: newBcId }
+        : r,
+    ))
+    if (!newBcId || !profile?.family_id) return
+    await saveDescriptionMacroMapping(profile.family_id, key, newBcId)
+    const count = await applyMappingRetroactively(profile.family_id, key, newBcId)
+    const sameInPreview = rows.filter(r => r._id !== rowId && normalizeDescriptionKey(r.description) === key).length
+    const parts = [
+      sameInPreview > 0 && `${sameInPreview + 1} righe in anteprima`,
+      count > 0 && `${count} transazioni esistenti`,
+    ].filter(Boolean).join(' · ')
+    if (parts) {
+      setLearnToast(`✓ Mappa salvata — ${parts} aggiornate`)
+      setTimeout(() => setLearnToast(''), 4000)
+    } else {
+      setLearnToast('✓ Mappa salvata per futuri import')
+      setTimeout(() => setLearnToast(''), 3000)
+    }
   }
 
   // ── Save confirmed rows ───────────────────────────────────────────────────
@@ -737,6 +778,12 @@ export default function ImportModal({
                 </div>
               )}
 
+              {learnToast && (
+                <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                  {learnToast}
+                </div>
+              )}
+
               {/* Table */}
               <div className="overflow-x-auto rounded-xl border text-xs">
                 <table className="w-full min-w-[640px]">
@@ -830,7 +877,7 @@ export default function ImportModal({
                         <td className="px-2 py-1.5">
                           <select
                             value={row.budget_category_id || ''}
-                            onChange={e => setRows(rs => rs.map(r => r._id === row._id ? { ...r, budget_category_id: e.target.value || undefined } : r))}
+                            onChange={e => handleMacroChange(row._id, row.description, e.target.value || undefined)}
                             className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[130px]"
                           >
                             <option value="">— —</option>

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
-import { formatCurrency, formatDate } from '../lib/utils'
+import { formatCurrency, formatDate, normalizeDescriptionKey } from '../lib/utils'
 import { Plus, Trash2, X, Filter, Upload, Sparkles, Loader2, Pencil, Layers, RefreshCw, CheckSquare, Search } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -29,6 +29,7 @@ export default function TransactionsPage() {
     addTransaction, deleteTransaction, updateTransaction, addCategory,
     bulkDeleteTransactions, bulkUpdateTransactions, bulkDeleteByIds, loadBudgetItems,
     viewMode, selectedMonth, selectedYear, customDateFrom, customDateTo,
+    saveDescriptionMacroMapping, applyMappingRetroactively,
   } = useAppStore()
   const { profile } = useAuthStore()
 
@@ -82,6 +83,7 @@ export default function TransactionsPage() {
 
   // ── AI suggest ───────────────────────────────────────────────────────────────
   const [suggestingCategory, setSuggestingCategory] = useState(false)
+  const [learnToast, setLearnToast] = useState('')
   const [showDashboard, setShowDashboard] = useState(false)
   const [formBudgetType, setFormBudgetType] = useState<'familiare' | 'professionale'>('familiare')
 
@@ -184,7 +186,23 @@ export default function TransactionsPage() {
         budget_category_id: data.budget_category_id || null,
         note: data.note || null,
       })
-      if (!error) { setShowModal(false); setEditingTx(null) }
+      if (!error) {
+        // Learn supplier→macrocategory mapping if budget_category_id changed
+        if (
+          data.budget_category_id &&
+          data.budget_category_id !== editingTx.budget_category_id &&
+          data.description
+        ) {
+          const key = normalizeDescriptionKey(data.description)
+          await saveDescriptionMacroMapping(profile.family_id, key, data.budget_category_id)
+          const count = await applyMappingRetroactively(profile.family_id, key, data.budget_category_id)
+          if (count > 0) {
+            setLearnToast(`✓ Mappa appresa — ${count} transazioni con la stessa descrizione aggiornate`)
+            setTimeout(() => setLearnToast(''), 4000)
+          }
+        }
+        setShowModal(false); setEditingTx(null)
+      }
     } else {
       const { error } = await addTransaction({
         ...data,
@@ -358,6 +376,12 @@ export default function TransactionsPage() {
 
   return (
     <div className="p-4 md:p-6 pb-28 md:pb-6">
+
+      {learnToast && (
+        <div className="mb-4 px-3 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+          {learnToast}
+        </div>
+      )}
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">

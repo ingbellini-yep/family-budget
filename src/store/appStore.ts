@@ -51,6 +51,11 @@ interface AppState {
   deleteBudgetCategory: (id: string) => Promise<{ error: any }>
   addCategory: (cat: { family_id: string; name: string; type: 'entrata' | 'uscita' | 'risparmio'; color?: string }) => Promise<{ error: any; data?: any }>
   saveCategoryBudgetMapping: (familyId: string, txCategoryId: string, budgetCategoryId: string | null) => Promise<{ error: any }>
+  // Description → macrocategory learned mappings
+  descriptionMacroMappings: Record<string, string>  // normalizedDesc → budgetCategoryId
+  loadDescriptionMacroMappings: (familyId: string) => Promise<void>
+  saveDescriptionMacroMapping: (familyId: string, descriptionKey: string, budgetCategoryId: string) => Promise<void>
+  applyMappingRetroactively: (familyId: string, descriptionKey: string, budgetCategoryId: string) => Promise<number>
 }
 
 const now = new Date()
@@ -66,6 +71,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   budgetItems: [],
   categoryBudgetMappings: [],
   yearTransactions: [],
+  descriptionMacroMappings: {},
   selectedMonth: now.getMonth() + 1,
   selectedYear: now.getFullYear(),
   viewMode: 'month',
@@ -147,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().loadBudgetCategories(familyId),
       get().loadBudgetItems(familyId, selectedYear),
       get().loadCategoryBudgetMappings(familyId),
+      get().loadDescriptionMacroMappings(familyId),
     ])
     set({ loading: false })
   },
@@ -305,5 +312,54 @@ export const useAppStore = create<AppState>((set, get) => ({
       .upsert({ family_id: familyId, transaction_category_id: txCategoryId, budget_category_id: budgetCategoryId },
                { onConflict: 'family_id,transaction_category_id' })
     return { error }
+  },
+
+  // ── Learned description → macrocategory mappings ──────────────────────────
+
+  loadDescriptionMacroMappings: async (familyId) => {
+    const { data } = await (supabase as any)
+      .from('description_macro_mapping')
+      .select('description_key, budget_category_id')
+      .eq('family_id', familyId)
+    if (data) {
+      const map: Record<string, string> = {}
+      data.forEach((r: any) => { map[r.description_key] = r.budget_category_id })
+      set({ descriptionMacroMappings: map })
+    }
+  },
+
+  saveDescriptionMacroMapping: async (familyId, descriptionKey, budgetCategoryId) => {
+    await (supabase as any)
+      .from('description_macro_mapping')
+      .upsert(
+        { family_id: familyId, description_key: descriptionKey, budget_category_id: budgetCategoryId, updated_at: new Date().toISOString() },
+        { onConflict: 'family_id,description_key' },
+      )
+    set(state => ({
+      descriptionMacroMappings: { ...state.descriptionMacroMappings, [descriptionKey]: budgetCategoryId },
+    }))
+  },
+
+  applyMappingRetroactively: async (familyId, descriptionKey, budgetCategoryId) => {
+    const { data } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('family_id', familyId)
+      .ilike('description', descriptionKey)
+      .neq('budget_category_id', budgetCategoryId)
+    if (!data || data.length === 0) return 0
+    const ids = data.map((r: any) => r.id)
+    const { error } = await supabase
+      .from('transactions')
+      .update({ budget_category_id: budgetCategoryId })
+      .in('id', ids)
+    if (!error) {
+      set(state => ({
+        transactions: state.transactions.map(t =>
+          ids.includes(t.id) ? { ...t, budget_category_id: budgetCategoryId } : t,
+        ),
+      }))
+    }
+    return error ? 0 : ids.length
   },
 }))
