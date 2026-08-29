@@ -267,7 +267,7 @@ export default function BudgetPage() {
   const savingItems = useMemo(() => budgetItems.filter((i: any) => i.type === 'saving_goal'), [budgetItems])
 
   // ── split categories by type
-  const familyCategories = useMemo(() => budgetCategories.filter((c: any) => c.budget_type !== 'professionale'), [budgetCategories])
+  const familyCategories = useMemo(() => budgetCategories.filter((c: any) => c.budget_type === 'familiare'), [budgetCategories])
   const professionalCategories = useMemo(() => budgetCategories.filter((c: any) => c.budget_type === 'professionale'), [budgetCategories])
 
   // ── annual totals
