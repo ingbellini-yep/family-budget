@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { PiggyBank as PocketIcon } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -26,6 +27,7 @@ export default function DashboardPage() {
     setSelectedMonth, setSelectedYear, loadTransactions,
   } = useAppStore()
   const { profile } = useAuthStore()
+  const navigate = useNavigate()
   const [historicalData, setHistoricalData] = useState<any[]>([])
 
   // Period label for subtitle
@@ -330,11 +332,14 @@ export default function DashboardPage() {
                     </h3>
                     <div className="space-y-3">
                       {group.map(d => (
-                        <div key={d.id}>
+                        <div key={d.id}
+                          onClick={() => navigate('/transactions', { state: { budgetCategoryId: d.id } })}
+                          className="cursor-pointer rounded-lg px-2 py-1.5 -mx-2 hover:bg-indigo-50/60 transition-colors group"
+                          title="Clicca per vedere le transazioni di questa macrocategoria">
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-2 min-w-0">
                               {d.icon && <span className="text-base leading-none">{d.icon}</span>}
-                              <span className="text-sm font-medium text-gray-700 truncate">{d.name}</span>
+                              <span className="text-sm font-medium text-gray-700 truncate group-hover:text-primary">{d.name}</span>
                               {d.budget > 0 && (
                                 <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${
                                   d.status === 'green' ? 'bg-green-100 text-green-700' :
@@ -345,8 +350,9 @@ export default function DashboardPage() {
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-gray-500 shrink-0 ml-2">
+                            <div className="text-xs text-gray-500 shrink-0 ml-2 flex items-center gap-1.5">
                               {formatCurrency(d.spent)}{d.budget > 0 && ` / ${formatCurrency(d.budget)}`}
+                              <span className="text-gray-300 group-hover:text-primary text-xs">›</span>
                             </div>
                           </div>
                           {d.budget > 0 ? (

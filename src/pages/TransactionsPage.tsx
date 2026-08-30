@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate, normalizeDescriptionKey } from '../lib/utils'
-import { Plus, Trash2, X, Filter, Upload, Loader2, Pencil, Layers, RefreshCw, CheckSquare, Search, ArrowRight } from 'lucide-react'
+import { Plus, Trash2, X, Filter, Upload, Loader2, Pencil, Layers, RefreshCw, CheckSquare, Search, ArrowRight, AlertCircle } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useLocation } from 'react-router-dom'
 import ImportModal from '../components/ImportModal'
 import PeriodSelector from '../components/PeriodSelector'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
@@ -44,11 +45,26 @@ export default function TransactionsPage() {
   // ── Filter state ─────────────────────────────────────────────────────────────
   const [filterType, setFilterType] = useState<'all' | 'entrata' | 'uscita' | 'giroconto'>('all')
   const [filterBudgetCategory, setFilterBudgetCategory] = useState('')
+  const [filterBudgetItem, setFilterBudgetItem] = useState('')   // '' | '__none__' | uuid
   const [filterAccount, setFilterAccount] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
   const [search, setSearch] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+
+  // ── Read incoming navigation state from Dashboard ─────────────────────────
+  const location = useLocation()
+  useEffect(() => {
+    const incoming = (location.state as any)?.budgetCategoryId
+    if (incoming) {
+      setFilterBudgetCategory(incoming)
+      setFilterBudgetItem('')
+      setFilterType('all')
+      setFilterAccount(''); setFilterDateFrom(''); setFilterDateTo(''); setSearch('')
+      // Clear the navigation state so Back doesn't re-apply it
+      window.history.replaceState({}, '')
+    }
+  }, [location.state])
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -114,11 +130,16 @@ export default function TransactionsPage() {
 
   // ── Filtered list ─────────────────────────────────────────────────────────────
   const hasActiveFilters = filterType !== 'all' || filterBudgetCategory
-    || filterAccount || filterDateFrom || filterDateTo || search
+    || filterBudgetItem || filterAccount || filterDateFrom || filterDateTo || search
 
   const filtered = useMemo(() => transactions.filter(t => {
     if (filterType !== 'all' && t.type !== filterType) return false
     if (filterBudgetCategory && t.budget_category_id !== filterBudgetCategory) return false
+    if (filterBudgetItem === '__none__') {
+      if (t.budget_category_id !== filterBudgetCategory || t.budget_item_id) return false
+    } else if (filterBudgetItem) {
+      if (t.budget_item_id !== filterBudgetItem) return false
+    }
     if (filterAccount && t.account_id !== filterAccount) return false
     if (filterDateFrom && t.date < filterDateFrom) return false
     if (filterDateTo && t.date > filterDateTo) return false
@@ -127,7 +148,7 @@ export default function TransactionsPage() {
       if (!t.description?.toLowerCase().includes(q) && !t.note?.toLowerCase().includes(q)) return false
     }
     return true
-  }), [transactions, filterType, filterBudgetCategory, filterAccount, filterDateFrom, filterDateTo, search])
+  }), [transactions, filterType, filterBudgetCategory, filterBudgetItem, filterAccount, filterDateFrom, filterDateTo, search])
 
   useEffect(() => {
     const filteredIds = new Set(filtered.map((t: any) => t.id))
@@ -138,7 +159,7 @@ export default function TransactionsPage() {
   }, [filtered])
 
   const resetFilters = () => {
-    setFilterType('all'); setFilterBudgetCategory('')
+    setFilterType('all'); setFilterBudgetCategory(''); setFilterBudgetItem('')
     setFilterAccount(''); setFilterDateFrom(''); setFilterDateTo(''); setSearch('')
   }
 
@@ -565,6 +586,85 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* ── Drill-down detail panel ─────────────────────────────────────────── */}
+      {filterBudgetCategory && (() => {
+        const bc = budgetCategories.find((c: any) => c.id === filterBudgetCategory)
+        // All transactions of this macrocategory (ignore filterBudgetItem for grouping)
+        const macroTxs = transactions.filter((t: any) => t.budget_category_id === filterBudgetCategory)
+        // Group by budget_item_id
+        const grouped: Record<string, { item: any | null; txs: any[] }> = {}
+        const unclassified: any[] = []
+        for (const t of macroTxs) {
+          if (!t.budget_item_id) {
+            unclassified.push(t)
+          } else {
+            if (!grouped[t.budget_item_id]) {
+              grouped[t.budget_item_id] = {
+                item: budgetItems.find((i: any) => i.id === t.budget_item_id) || null,
+                txs: [],
+              }
+            }
+            grouped[t.budget_item_id].txs.push(t)
+          }
+        }
+        const rows = Object.entries(grouped).sort((a, b) =>
+          (a[1].item?.description || '').localeCompare(b[1].item?.description || ''),
+        )
+        const totalMacro = macroTxs.filter((t: any) => t.type === 'uscita').reduce((s: number, t: any) => s + t.amount, 0)
+        return (
+          <div className="mb-4 bg-white rounded-xl border border-indigo-100 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50/60 border-b border-indigo-100">
+              <span className="text-base">{bc?.icon || '📂'}</span>
+              <span className="font-semibold text-sm text-indigo-900">{bc?.name || 'Macrocategoria'}</span>
+              <span className="ml-auto text-xs text-indigo-600 font-medium">{macroTxs.length} transazioni · {formatCurrency(totalMacro)}</span>
+              {filterBudgetItem && (
+                <button onClick={() => setFilterBudgetItem('')}
+                  className="ml-2 text-xs text-indigo-400 hover:text-indigo-700 flex items-center gap-0.5">
+                  <X className="h-3 w-3" /> Rimuovi filtro voce
+                </button>
+              )}
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-gray-400 border-b">
+                  <th className="text-left px-4 py-1.5 font-medium">Voce di budget</th>
+                  <th className="text-right px-4 py-1.5 font-medium">Transazioni</th>
+                  <th className="text-right px-4 py-1.5 font-medium">Totale uscite</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(([itemId, { item, txs }]) => {
+                  const total = txs.filter((t: any) => t.type === 'uscita').reduce((s: number, t: any) => s + t.amount, 0)
+                  const isActive = filterBudgetItem === itemId
+                  return (
+                    <tr key={itemId}
+                      onClick={() => setFilterBudgetItem(isActive ? '' : itemId)}
+                      className={`border-b last:border-b-0 cursor-pointer transition-colors ${isActive ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}>
+                      <td className="px-4 py-2 font-medium text-gray-800">{item?.description || itemId}</td>
+                      <td className="px-4 py-2 text-right text-gray-500">{txs.length}</td>
+                      <td className="px-4 py-2 text-right text-red-600 font-medium">{formatCurrency(total)}</td>
+                    </tr>
+                  )
+                })}
+                {unclassified.length > 0 && (() => {
+                  const total = unclassified.filter((t: any) => t.type === 'uscita').reduce((s: number, t: any) => s + t.amount, 0)
+                  const isActive = filterBudgetItem === '__none__'
+                  return (
+                    <tr
+                      onClick={() => setFilterBudgetItem(isActive ? '' : '__none__')}
+                      className={`cursor-pointer transition-colors ${isActive ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+                      <td className="px-4 py-2 text-gray-400 italic">Non classificate (solo macrocategoria)</td>
+                      <td className="px-4 py-2 text-right text-gray-500">{unclassified.length}</td>
+                      <td className="px-4 py-2 text-right text-red-400 font-medium">{formatCurrency(total)}</td>
+                    </tr>
+                  )
+                })()}
+              </tbody>
+            </table>
+          </div>
+        )
+      })()}
 
       {/* ── Transaction list ────────────────────────────────────────────────── */}
       <div className="space-y-1.5">
