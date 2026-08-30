@@ -69,6 +69,7 @@ export default function TransactionsPage() {
   const [bulkUpdateScope, setBulkUpdateScope] = useState<'selected' | 'filtered'>('selected')
   const [bulkUpdateType, setBulkUpdateType] = useState<'' | 'entrata' | 'uscita'>('')
   const [bulkUpdateBudgetCategoryId, setBulkUpdateBudgetCategoryId] = useState('')
+  const [bulkUpdateAccountId, setBulkUpdateAccountId] = useState('')
   const [bulkUpdating, setBulkUpdating] = useState(false)
   const [bulkUpdateError, setBulkUpdateError] = useState('')
 
@@ -277,7 +278,7 @@ export default function TransactionsPage() {
   }
 
   const handleOpenBulkUpdate = (scope: 'selected' | 'filtered') => {
-    setBulkUpdateScope(scope); setBulkUpdateType(''); setBulkUpdateBudgetCategoryId(''); setBulkUpdateError('')
+    setBulkUpdateScope(scope); setBulkUpdateType(''); setBulkUpdateBudgetCategoryId(''); setBulkUpdateAccountId(''); setBulkUpdateError('')
     setShowBulkUpdateModal(true)
   }
 
@@ -287,6 +288,7 @@ export default function TransactionsPage() {
     const updates: Record<string, any> = {}
     if (bulkUpdateType) updates.type = bulkUpdateType
     if (bulkUpdateBudgetCategoryId) updates.budget_category_id = bulkUpdateBudgetCategoryId
+    if (bulkUpdateAccountId) updates.account_id = bulkUpdateAccountId
     if (!Object.keys(updates).length) return
     setBulkUpdateError(''); setBulkUpdating(true)
     const { error } = await bulkUpdateTransactions(ids, updates)
@@ -338,7 +340,7 @@ export default function TransactionsPage() {
     || (bulkMode === 'date' && bulkDateFrom && bulkDateTo && bulkDateFrom <= bulkDateTo)
     || (bulkMode === 'account' && bulkAccountId)
   const bulkUpdateCount = bulkUpdateScope === 'selected' ? selectedIds.size : filtered.length
-  const bulkUpdateValid = (bulkUpdateType || bulkUpdateBudgetCategoryId) && bulkUpdateCount > 0
+  const bulkUpdateValid = (bulkUpdateType || bulkUpdateBudgetCategoryId || bulkUpdateAccountId) && bulkUpdateCount > 0
 
   const CHART_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#84cc16']
 
@@ -675,6 +677,21 @@ export default function TransactionsPage() {
                   placeholder={watchType === 'giroconto' ? 'Descrizione trasferimento...' : 'Se vuoto usa il nome della voce budget'} />
               </div>
 
+              {/* Conto — comune per Entrata e Uscita; Giroconto usa i suoi selettori dedicati */}
+              {watchType !== 'giroconto' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700">
+                    {watchType === 'entrata' ? 'Conto accreditato *' : 'Conto addebitato *'}
+                  </label>
+                  <select {...form.register('account_id')}
+                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
+                    <option value="">Seleziona conto...</option>
+                    {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                  {form.formState.errors.account_id && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.account_id.message}</p>}
+                </div>
+              )}
+
               {/* ── FLUSSO ENTRATA ── */}
               {watchType === 'entrata' && (
                 <div className="space-y-3">
@@ -706,15 +723,6 @@ export default function TransactionsPage() {
                       </div>
                     )}
                     <p className="text-[10px] text-gray-400 mt-1">Budget aggiornato con importo €0 — imposta il valore nel Budget</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">Conto accreditato *</label>
-                    <select {...form.register('account_id')}
-                      className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
-                      <option value="">Seleziona conto...</option>
-                      {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                    {form.formState.errors.account_id && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.account_id.message}</p>}
                   </div>
                 </div>
               )}
@@ -770,16 +778,6 @@ export default function TransactionsPage() {
                       {showNewItemInput && <p className="text-[10px] text-gray-400 mt-1">Aggiunta al budget con importo €0 — imposta il valore nel Budget</p>}
                     </div>
                   )}
-
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">Conto addebitato *</label>
-                    <select {...form.register('account_id')}
-                      className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
-                      <option value="">Seleziona conto...</option>
-                      {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                    {form.formState.errors.account_id && <p className="text-red-500 text-xs mt-0.5">{form.formState.errors.account_id.message}</p>}
-                  </div>
                 </div>
               )}
 
@@ -868,6 +866,14 @@ export default function TransactionsPage() {
                   className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
                   <option value="">— Non cambiare —</option>
                   {budgetCategories.map((bc: any) => <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700">Conto (opzionale)</label>
+                <select value={bulkUpdateAccountId} onChange={e => setBulkUpdateAccountId(e.target.value)}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
+                  <option value="">— Non cambiare —</option>
+                  {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
               {bulkUpdateError && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{bulkUpdateError}</p>}
