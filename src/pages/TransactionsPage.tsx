@@ -234,11 +234,14 @@ export default function TransactionsPage() {
     if (editingTx) {
       const { error } = await updateTransaction(editingTx.id, payload)
       if (!error) {
-        // Learn mapping se budget_category cambiato
-        if (budget_category_id && budget_category_id !== editingTx.budget_category_id && description) {
+        // Learn mapping se budget_category o budget_item cambiato
+        const budgetItemId = payload.budget_item_id
+        const macroChanged = budget_category_id && budget_category_id !== editingTx.budget_category_id
+        const itemChanged = budgetItemId && budgetItemId !== editingTx.budget_item_id
+        if ((macroChanged || itemChanged) && budget_category_id && description) {
           const key = normalizeDescriptionKey(description)
-          await saveDescriptionMacroMapping(profile.family_id, key, budget_category_id)
-          const count = await applyMappingRetroactively(profile.family_id, key, budget_category_id)
+          await saveDescriptionMacroMapping(profile.family_id, key, budget_category_id, budgetItemId || undefined)
+          const count = await applyMappingRetroactively(profile.family_id, key, budget_category_id, budgetItemId || undefined)
           if (count > 0) {
             setLearnToast(`✓ Mappa appresa — ${count} transazioni aggiornate`)
             setTimeout(() => setLearnToast(''), 4000)

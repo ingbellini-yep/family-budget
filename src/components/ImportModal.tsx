@@ -406,8 +406,13 @@ export default function ImportModal({
     for (let i = 0; i < updated.length; i++) {
       if (!updated[i].include || updated[i].budget_category_id) continue
       const key = normalizeDescriptionKey(updated[i].description)
-      if (descriptionMacroMappings[key]) {
-        updated[i] = { ...updated[i], budget_category_id: descriptionMacroMappings[key] }
+      const learned = descriptionMacroMappings[key]
+      if (learned) {
+        updated[i] = {
+          ...updated[i],
+          budget_category_id: learned.budget_category_id,
+          budget_item_id: learned.budget_item_id || updated[i].budget_item_id,
+        }
       }
     }
     setRows([...updated])
@@ -439,17 +444,34 @@ export default function ImportModal({
   }
 
   // ── Handle manual macrocategory correction ────────────────────────────────
-  const handleMacroChange = async (rowId: string, description: string, newBcId: string | undefined) => {
+  // Changing macro resets item but does NOT save the mapping yet — wait for item selection
+  const handleMacroChange = (rowId: string, description: string, newBcId: string | undefined) => {
     const key = normalizeDescriptionKey(description)
-    // Apply to ALL rows in preview with the same description key; reset budget_item_id when macro changes
     setRows(rs => rs.map(r =>
       normalizeDescriptionKey(r.description) === key
         ? { ...r, budget_category_id: newBcId, budget_item_id: undefined }
         : r,
     ))
-    if (!newBcId || !profile?.family_id) return
-    await saveDescriptionMacroMapping(profile.family_id, key, newBcId)
-    const count = await applyMappingRetroactively(profile.family_id, key, newBcId)
+  }
+
+  // ── Handle budget_item selection — saves full mapping (macro + item) ────────
+  const handleItemChange = async (rowId: string, description: string, newItemId: string | undefined) => {
+    const key = normalizeDescriptionKey(description)
+    // Derive budget_category_id from the selected item
+    const item = budgetItems.find((i: any) => i.id === newItemId)
+    const bcId = item?.budget_category_id || rows.find(r => r._id === rowId)?.budget_category_id
+    // Apply to ALL rows in preview with the same description key
+    setRows(rs => rs.map(r =>
+      normalizeDescriptionKey(r.description) === key
+        ? { ...r, budget_item_id: newItemId || undefined, ...(bcId ? { budget_category_id: bcId } : {}) }
+        : r,
+    ))
+    if (!profile?.family_id) return
+    // Save learned mapping only if we have at least the macro
+    const macroToSave = bcId || (item?.type === 'income' ? incomeMacroId : undefined)
+    if (!macroToSave) return
+    await saveDescriptionMacroMapping(profile.family_id, key, macroToSave, newItemId)
+    const count = await applyMappingRetroactively(profile.family_id, key, macroToSave, newItemId)
     const sameInPreview = rows.filter(r => r._id !== rowId && normalizeDescriptionKey(r.description) === key).length
     const parts = [
       sameInPreview > 0 && `${sameInPreview + 1} righe in anteprima`,
@@ -887,7 +909,7 @@ export default function ImportModal({
                         <td className="px-2 py-1.5">
                           <select
                             value={row.budget_item_id || ''}
-                            onChange={e => setRows(rs => rs.map(r => r._id === row._id ? { ...r, budget_item_id: e.target.value || undefined } : r))}
+                            onChange={e => handleItemChange(row._id, row.description, e.target.value || undefined)}
                             className="border rounded px-1 py-0.5 text-xs focus:outline-none max-w-[140px]"
                             disabled={!row.budget_category_id && row.type !== 'entrata'}
                           >

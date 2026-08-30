@@ -51,11 +51,11 @@ interface AppState {
   deleteBudgetCategory: (id: string) => Promise<{ error: any }>
   addCategory: (cat: { family_id: string; name: string; type: 'entrata' | 'uscita' | 'risparmio'; color?: string; budget_category_id?: string | null }) => Promise<{ error: any; data?: any }>
   saveCategoryBudgetMapping: (familyId: string, txCategoryId: string, budgetCategoryId: string | null) => Promise<{ error: any }>
-  // Description → macrocategory learned mappings
-  descriptionMacroMappings: Record<string, string>  // normalizedDesc → budgetCategoryId
+  // Description → macrocategory+item learned mappings
+  descriptionMacroMappings: Record<string, { budget_category_id: string; budget_item_id?: string }>
   loadDescriptionMacroMappings: (familyId: string) => Promise<void>
-  saveDescriptionMacroMapping: (familyId: string, descriptionKey: string, budgetCategoryId: string) => Promise<void>
-  applyMappingRetroactively: (familyId: string, descriptionKey: string, budgetCategoryId: string) => Promise<number>
+  saveDescriptionMacroMapping: (familyId: string, descriptionKey: string, budgetCategoryId: string, budgetItemId?: string) => Promise<void>
+  applyMappingRetroactively: (familyId: string, descriptionKey: string, budgetCategoryId: string, budgetItemId?: string) => Promise<number>
 }
 
 const now = new Date()
@@ -319,44 +319,58 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadDescriptionMacroMappings: async (familyId) => {
     const { data } = await (supabase as any)
       .from('description_macro_mapping')
-      .select('description_key, budget_category_id')
+      .select('description_key, budget_category_id, budget_item_id')
       .eq('family_id', familyId)
     if (data) {
-      const map: Record<string, string> = {}
-      data.forEach((r: any) => { map[r.description_key] = r.budget_category_id })
+      const map: Record<string, { budget_category_id: string; budget_item_id?: string }> = {}
+      data.forEach((r: any) => {
+        map[r.description_key] = { budget_category_id: r.budget_category_id, budget_item_id: r.budget_item_id || undefined }
+      })
       set({ descriptionMacroMappings: map })
     }
   },
 
-  saveDescriptionMacroMapping: async (familyId, descriptionKey, budgetCategoryId) => {
+  saveDescriptionMacroMapping: async (familyId, descriptionKey, budgetCategoryId, budgetItemId?) => {
     await (supabase as any)
       .from('description_macro_mapping')
       .upsert(
-        { family_id: familyId, description_key: descriptionKey, budget_category_id: budgetCategoryId, updated_at: new Date().toISOString() },
+        {
+          family_id: familyId,
+          description_key: descriptionKey,
+          budget_category_id: budgetCategoryId,
+          budget_item_id: budgetItemId || null,
+          updated_at: new Date().toISOString(),
+        },
         { onConflict: 'family_id,description_key' },
       )
     set(state => ({
-      descriptionMacroMappings: { ...state.descriptionMacroMappings, [descriptionKey]: budgetCategoryId },
+      descriptionMacroMappings: {
+        ...state.descriptionMacroMappings,
+        [descriptionKey]: { budget_category_id: budgetCategoryId, budget_item_id: budgetItemId },
+      },
     }))
   },
 
-  applyMappingRetroactively: async (familyId, descriptionKey, budgetCategoryId) => {
-    const { data } = await supabase
+  applyMappingRetroactively: async (familyId, descriptionKey, budgetCategoryId, budgetItemId?) => {
+    const query = supabase
       .from('transactions')
       .select('id')
       .eq('family_id', familyId)
       .ilike('description', descriptionKey)
-      .neq('budget_category_id', budgetCategoryId)
+    // Apply to rows where either macro or item differs
+    const { data } = await query
     if (!data || data.length === 0) return 0
+    const updates: Record<string, any> = { budget_category_id: budgetCategoryId }
+    if (budgetItemId) updates.budget_item_id = budgetItemId
     const ids = data.map((r: any) => r.id)
     const { error } = await supabase
       .from('transactions')
-      .update({ budget_category_id: budgetCategoryId })
+      .update(updates)
       .in('id', ids)
     if (!error) {
       set(state => ({
         transactions: state.transactions.map(t =>
-          ids.includes(t.id) ? { ...t, budget_category_id: budgetCategoryId } : t,
+          ids.includes(t.id) ? { ...t, ...updates } : t,
         ),
       }))
     }
