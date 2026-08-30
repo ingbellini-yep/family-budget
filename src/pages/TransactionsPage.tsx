@@ -85,6 +85,7 @@ export default function TransactionsPage() {
   const [bulkUpdateScope, setBulkUpdateScope] = useState<'selected' | 'filtered'>('selected')
   const [bulkUpdateType, setBulkUpdateType] = useState<'' | 'entrata' | 'uscita'>('')
   const [bulkUpdateBudgetCategoryId, setBulkUpdateBudgetCategoryId] = useState('')
+  const [bulkUpdateBudgetItemId, setBulkUpdateBudgetItemId] = useState('')
   const [bulkUpdateAccountId, setBulkUpdateAccountId] = useState('')
   const [bulkUpdating, setBulkUpdating] = useState(false)
   const [bulkUpdateError, setBulkUpdateError] = useState('')
@@ -299,7 +300,7 @@ export default function TransactionsPage() {
   }
 
   const handleOpenBulkUpdate = (scope: 'selected' | 'filtered') => {
-    setBulkUpdateScope(scope); setBulkUpdateType(''); setBulkUpdateBudgetCategoryId(''); setBulkUpdateAccountId(''); setBulkUpdateError('')
+    setBulkUpdateScope(scope); setBulkUpdateType(''); setBulkUpdateBudgetCategoryId(''); setBulkUpdateBudgetItemId(''); setBulkUpdateAccountId(''); setBulkUpdateError('')
     setShowBulkUpdateModal(true)
   }
 
@@ -308,7 +309,12 @@ export default function TransactionsPage() {
     if (!ids.length) return
     const updates: Record<string, any> = {}
     if (bulkUpdateType) updates.type = bulkUpdateType
-    if (bulkUpdateBudgetCategoryId) updates.budget_category_id = bulkUpdateBudgetCategoryId
+    if (bulkUpdateBudgetCategoryId) {
+      updates.budget_category_id = bulkUpdateBudgetCategoryId
+      updates.budget_item_id = bulkUpdateBudgetItemId || null
+    } else if (bulkUpdateBudgetItemId) {
+      updates.budget_item_id = bulkUpdateBudgetItemId
+    }
     if (bulkUpdateAccountId) updates.account_id = bulkUpdateAccountId
     if (!Object.keys(updates).length) return
     setBulkUpdateError(''); setBulkUpdating(true)
@@ -361,7 +367,7 @@ export default function TransactionsPage() {
     || (bulkMode === 'date' && bulkDateFrom && bulkDateTo && bulkDateFrom <= bulkDateTo)
     || (bulkMode === 'account' && bulkAccountId)
   const bulkUpdateCount = bulkUpdateScope === 'selected' ? selectedIds.size : filtered.length
-  const bulkUpdateValid = (bulkUpdateType || bulkUpdateBudgetCategoryId || bulkUpdateAccountId) && bulkUpdateCount > 0
+  const bulkUpdateValid = (bulkUpdateType || bulkUpdateBudgetCategoryId || bulkUpdateBudgetItemId || bulkUpdateAccountId) && bulkUpdateCount > 0
 
   const CHART_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#84cc16']
 
@@ -951,7 +957,7 @@ export default function TransactionsPage() {
                 <label className="text-xs font-medium text-gray-700">Tipo (opzionale)</label>
                 <div className="flex rounded-lg bg-gray-100 p-1 mt-1 gap-1">
                   {(['', 'uscita', 'entrata'] as const).map(v => (
-                    <button key={v} type="button" onClick={() => setBulkUpdateType(v)}
+                    <button key={v} type="button" onClick={() => { setBulkUpdateType(v); setBulkUpdateBudgetCategoryId(''); setBulkUpdateBudgetItemId('') }}
                       className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
                         bulkUpdateType === v ? v === 'uscita' ? 'bg-red-500 text-white' : v === 'entrata' ? 'bg-green-500 text-white' : 'bg-white shadow text-gray-700' : 'text-gray-500'
                       }`}>
@@ -960,14 +966,34 @@ export default function TransactionsPage() {
                   ))}
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-gray-700">Macrocategoria (opzionale)</label>
-                <select value={bulkUpdateBudgetCategoryId} onChange={e => setBulkUpdateBudgetCategoryId(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
-                  <option value="">— Non cambiare —</option>
-                  {budgetCategories.map((bc: any) => <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>)}
-                </select>
-              </div>
+              {bulkUpdateType !== 'entrata' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-700">Macrocategoria (opzionale)</label>
+                  <select value={bulkUpdateBudgetCategoryId}
+                    onChange={e => { setBulkUpdateBudgetCategoryId(e.target.value); setBulkUpdateBudgetItemId('') }}
+                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
+                    <option value="">— Non cambiare —</option>
+                    {budgetCategories
+                      .filter((bc: any) => bulkUpdateType === 'uscita' ? bc.budget_type !== 'entrata' : true)
+                      .map((bc: any) => <option key={bc.id} value={bc.id}>{bc.icon} {bc.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {(bulkUpdateBudgetCategoryId || bulkUpdateType === 'entrata') && (() => {
+                const itemOpts = bulkUpdateType === 'entrata'
+                  ? budgetItems.filter((i: any) => i.type === 'income' && i.active !== false)
+                  : budgetItems.filter((i: any) => i.budget_category_id === bulkUpdateBudgetCategoryId && i.type !== 'income' && i.active !== false)
+                return itemOpts.length > 0 ? (
+                  <div>
+                    <label className="text-xs font-medium text-gray-700">Voce di budget (opzionale)</label>
+                    <select value={bulkUpdateBudgetItemId} onChange={e => setBulkUpdateBudgetItemId(e.target.value)}
+                      className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none">
+                      <option value="">— Non cambiare —</option>
+                      {itemOpts.map((i: any) => <option key={i.id} value={i.id}>{i.description}</option>)}
+                    </select>
+                  </div>
+                ) : null
+              })()}
               <div>
                 <label className="text-xs font-medium text-gray-700">Conto (opzionale)</label>
                 <select value={bulkUpdateAccountId} onChange={e => setBulkUpdateAccountId(e.target.value)}
