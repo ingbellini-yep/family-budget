@@ -2,12 +2,13 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency, formatDate, normalizeDescriptionKey } from '../lib/utils'
-import { Plus, Trash2, X, Filter, Upload, Loader2, Pencil, Layers, RefreshCw, CheckSquare, Search, ArrowRight, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, X, Filter, Upload, Loader2, Pencil, Layers, RefreshCw, CheckSquare, Search, ArrowRight, AlertCircle, FileDown } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useLocation } from 'react-router-dom'
 import ImportModal from '../components/ImportModal'
+import { exportTransazioniPerCategoria } from '../lib/usePDFExport'
 import PeriodSelector from '../components/PeriodSelector'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -299,6 +300,21 @@ export default function TransactionsPage() {
     else { setSelectionDeleteConfirm(false); setSelectedIds(new Set()) }
   }
 
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const handleExportSelectedPdf = async () => {
+    const txs = transactions.filter((t: any) => selectedIds.has(t.id))
+    if (!txs.length) return
+    setExportingPdf(true)
+    try {
+      await exportTransazioniPerCategoria({
+        familyName: profile?.email || '',
+        transactions: txs, budgetCategories, budgetItems, accounts,
+      })
+    } finally {
+      setExportingPdf(false)
+    }
+  }
+
   const handleOpenBulkUpdate = (scope: 'selected' | 'filtered') => {
     setBulkUpdateScope(scope); setBulkUpdateType(''); setBulkUpdateBudgetCategoryId(''); setBulkUpdateBudgetItemId(''); setBulkUpdateAccountId(''); setBulkUpdateError('')
     setShowBulkUpdateModal(true)
@@ -567,6 +583,10 @@ export default function TransactionsPage() {
               <button onClick={() => handleOpenBulkUpdate('selected')}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
                 <Pencil className="h-3.5 w-3.5" /> Modifica
+              </button>
+              <button onClick={handleExportSelectedPdf} disabled={exportingPdf}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 text-white rounded-lg text-xs font-medium hover:bg-gray-800 disabled:opacity-50">
+                {exportingPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />} PDF
               </button>
               {!selectionDeleteConfirm ? (
                 <button onClick={() => setSelectionDeleteConfirm(true)}

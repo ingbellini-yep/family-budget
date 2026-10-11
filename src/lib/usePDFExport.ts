@@ -156,9 +156,13 @@ function drawTable(cfg: TableConfig): number {
       const text = col.format ? col.format(rawVal, row) : String(rawVal ?? '')
       const align = col.align || 'left'
       const tx = align === 'right' ? cx + col.width - 1.5 : align === 'center' ? cx + col.width / 2 : cx + 1.5
-      // Clip text to column width
-      const maxChars = Math.floor(col.width / (fontSize * 0.45))
-      const clipped = text.length > maxChars ? text.slice(0, maxChars - 1) + '…' : text
+      // Clip text to column width (measured, not estimated)
+      const maxW = col.width - 3
+      let clipped = text
+      if (pdf.getTextWidth(clipped) > maxW) {
+        while (clipped.length > 1 && pdf.getTextWidth(clipped + '...') > maxW) clipped = clipped.slice(0, -1)
+        clipped += '...'
+      }
       pdf.text(clipped, tx, y + rowH - 2, { align })
       cx += col.width
     }
@@ -718,6 +722,152 @@ export async function exportDashboardSnapshot(params: {
 
   addFooterToAllPages(pdf, dateStr)
   pdf.save(`FamilyBudget_Dashboard_${year}${String(month).padStart(2, '0')}_${todayFile()}.pdf`)
+}
+
+// ─── PDF Transazioni selezionate per categoria ────────────────────────────────
+
+export async function exportTransazioniPerCategoria(params: {
+  familyName: string
+  transactions: any[]
+  budgetCategories: any[]
+  budgetItems: any[]
+  accounts: any[]
+}) {
+  const { familyName, transactions, budgetCategories, budgetItems, accounts } = params
+  const pdf = createDoc()
+  const dateStr = today()
+  const TITLE = 'Transazioni per Categoria'
+
+  const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date))
+  const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  const subtitle = sorted.length
+    ? `${sorted.length} transazioni · ${fmtDate(sorted[0].date)} - ${fmtDate(sorted[sorted.length - 1].date)}`
+    : '0 transazioni'
+
+  // Signed amount: entrate +, uscite −, giroconti excluded from totals
+  const signed = (t: any) => t.type === 'entrata' ? Number(t.amount) : t.type === 'uscita' ? -Number(t.amount) : 0
+  const fmtSigned = (v: number) => (v > 0 ? '+' : v < 0 ? '-' : '') + fmtEur(Math.abs(v))
+  const accName = (id: string) => accounts.find((a: any) => a.id === id)?.name || '-'
+
+  // ── Grouping: macro → voce → transactions ──
+  type ItemGroup = { name: string; txs: any[]; total: number }
+  type MacroGroup = { name: string; items: Map<string, ItemGroup>; total: number; count: number }
+  const macros = new Map<string, MacroGroup>()
+  for (const t of sorted) {
+    const isGiro = t.type === 'giroconto'
+    const macroKey = isGiro ? '__giro__' : (t.budget_category_id || '__none__')
+    const macroName = isGiro ? 'Giroconti'
+      : budgetCategories.find((c: any) => c.id === t.budget_category_id)?.name || 'Senza macrocategoria'
+    if (!macros.has(macroKey)) macros.set(macroKey, { name: macroName, items: new Map(), total: 0, count: 0 })
+    const mg = macros.get(macroKey)!
+    const itemKey = isGiro ? '__giro__' : (t.budget_item_id || '__none__')
+    const itemName = isGiro ? 'Trasferimenti tra conti'
+      : budgetItems.find((i: any) => i.id === t.budget_item_id)?.description || 'Non classificate'
+    if (!mg.items.has(itemKey)) mg.items.set(itemKey, { name: itemName, txs: [], total: 0 })
+    const ig = mg.items.get(itemKey)!
+    ig.txs.push(t); ig.total += signed(t)
+    mg.total += signed(t); mg.count++
+  }
+  const macroList = [...macros.entries()]
+    .sort((a, b) => a[0] === '__giro__' ? 1 : b[0] === '__giro__' ? -1 : Math.abs(b[1].total) - Math.abs(a[1].total))
+
+  const totalIn  = sorted.filter(t => t.type === 'entrata').reduce((s, t) => s + Number(t.amount), 0)
+  const totalOut = sorted.filter(t => t.type === 'uscita').reduce((s, t) => s + Number(t.amount), 0)
+  const net = totalIn - totalOut
+
+  // ── Helpers ──
+  const pageH = pdf.internal.pageSize.getHeight()
+  let y = 28
+  const ensureSpace = (h: number) => {
+    if (y + h > pageH - 16) { pdf.addPage(); addHeader(pdf, TITLE, subtitle, familyName); y = 28 }
+  }
+  const totalRow = (label: string, value: number, opts: { bg: [number, number, number]; size?: number; indent?: number }) => {
+    ensureSpace(LINE_H)
+    const indent = opts.indent || 0
+    pdf.setFillColor(...opts.bg)
+    pdf.rect(MARGIN + indent, y, CONTENT_W - indent, LINE_H, 'F')
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(opts.size || 8)
+    pdf.setTextColor(...hexToRgb(DARK))
+    pdf.text(label, MARGIN + indent + 1.5, y + LINE_H - 2)
+    const [r, g, b] = value < 0 ? [220, 38, 38] : value > 0 ? [22, 163, 74] : [17, 24, 39]
+    pdf.setTextColor(r, g, b)
+    pdf.text(fmtSigned(value), MARGIN + CONTENT_W - 1.5, y + LINE_H - 2, { align: 'right' })
+    pdf.setTextColor(...hexToRgb(DARK))
+    y += LINE_H
+  }
+
+  // ── Page 1: KPI + summary ──
+  addHeader(pdf, TITLE, subtitle, familyName)
+  const kW = (CONTENT_W - 9) / 4
+  kpiBox(pdf, MARGIN,             y, kW, 'Entrate',      fmtEur(totalIn),  '#16a34a')
+  kpiBox(pdf, MARGIN + kW + 3,    y, kW, 'Uscite',       fmtEur(totalOut), '#dc2626')
+  kpiBox(pdf, MARGIN + (kW+3)*2,  y, kW, 'Netto',        fmtSigned(net),   net >= 0 ? '#2563eb' : '#dc2626')
+  kpiBox(pdf, MARGIN + (kW+3)*3,  y, kW, 'Transazioni',  String(sorted.length), '#111827')
+  y += 22
+
+  y = sectionTitle(pdf, 'Riepilogo per macrocategoria', y)
+  y = drawTable({
+    pdf, startY: y,
+    cols: [
+      { label: 'Macrocategoria', key: 'name', width: 120 },
+      { label: 'N. tx', key: 'count', width: 20, align: 'center' },
+      { label: 'Totale', key: 'total', width: 40, align: 'right', format: (v: number | null) => v === null ? 'escluso' : fmtSigned(v) },
+    ],
+    rows: macroList.map(([k, m]) => ({ name: m.name, count: String(m.count), total: k === '__giro__' ? null : m.total })),
+    onNewPage: (ny) => { addHeader(pdf, TITLE, subtitle, familyName); return ny },
+  })
+  totalRow('TOTALE COMPLESSIVO', net, { bg: [219, 234, 254], size: 9 })
+  y += 8
+
+  // ── Detail: macro → voce → transactions ──
+  ensureSpace(20)
+  y = sectionTitle(pdf, 'Dettaglio transazioni', y)
+  for (const [macroKey, mg] of macroList) {
+    const isGiro = macroKey === '__giro__'
+    ensureSpace(30)
+    // Macro heading
+    pdf.setFillColor(...hexToRgb(BRAND))
+    pdf.rect(MARGIN, y, CONTENT_W, LINE_H, 'F')
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(255, 255, 255)
+    pdf.text(mg.name, MARGIN + 1.5, y + LINE_H - 2)
+    pdf.text(`${mg.count} tx`, MARGIN + CONTENT_W - 1.5, y + LINE_H - 2, { align: 'right' })
+    y += LINE_H + 1
+
+    const items = [...mg.items.values()].sort((a, b) =>
+      a.name === 'Non classificate' ? 1 : b.name === 'Non classificate' ? -1 : a.name.localeCompare(b.name))
+    for (const ig of items) {
+      ensureSpace(LINE_H * 3)
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(...hexToRgb(BRAND))
+      pdf.text(ig.name, MARGIN + 3, y + 4.5)
+      y += 6
+      y = drawTable({
+        pdf, startY: y,
+        headerBg: '#e5e7eb', headerFg: '#374151',
+        cols: [
+          { label: 'Data',        key: 'date',    width: 20, align: 'center' },
+          { label: 'Descrizione', key: 'desc',    width: 88 },
+          { label: 'Conto',       key: 'account', width: 44 },
+          { label: 'Importo',     key: 'amount',  width: 28, align: 'right' },
+        ],
+        rows: ig.txs.map(t => ({
+          date: fmtDate(t.date),
+          desc: t.description || '-',
+          account: t.type === 'giroconto' ? `${accName(t.account_id)} > ${accName(t.to_account_id)}` : accName(t.account_id),
+          amount: t.type === 'giroconto' ? fmtEur(Number(t.amount)) : fmtSigned(signed(t)),
+        })),
+        onNewPage: (ny) => { addHeader(pdf, TITLE, subtitle, familyName); return ny },
+      })
+      if (!isGiro) totalRow(`Subtotale ${ig.name}`, ig.total, { bg: [243, 244, 246] })
+      y += 2
+    }
+    if (!isGiro) totalRow(`Totale ${mg.name}`, mg.total, { bg: [219, 234, 254], size: 8.5 })
+    y += 5
+  }
+  totalRow('TOTALE COMPLESSIVO', net, { bg: [191, 219, 254], size: 9.5 })
+
+  addFooterToAllPages(pdf, dateStr)
+  pdf.save(`FamilyBudget_Transazioni_${todayFile()}.pdf`)
 }
 
 // ─── PDF Estratto Conto ───────────────────────────────────────────────────────
